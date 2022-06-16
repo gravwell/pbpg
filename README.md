@@ -37,10 +37,10 @@ String      = lex(string) .
 pbpg creates unambiguous input by using left-to-right precedence, similar to Parsing Expression Grammar (PEG). If multiple paths in the parse tree could be satisfied, the left-most rule is used. For example:
 
 ```
-Pet = "Caterpiller" | "Cat" .
+Pet = "Caterpillar" | "Cat" .
 ```
 
-Given an input "Caterpillar's make terrible pets.", pbpg will match on the first substring in the list of given alternatives. If this were specified as `"Cat" | "Caterpiller"`, the parser would use "Cat", and the user would likely not get the intended result. This is also the fundamental shortcoming of PEGs. 
+Given an input "Caterpillar's make terrible pets.", pbpg will match on the first substring in the list of given alternatives. If this were specified as `"Cat" | "Caterpillar"`, the parser would use "Cat", and the user would likely not get the intended result. This is also the fundamental shortcoming of PEGs. 
 
 To avoid both the complexity of maintaining a stateful lexer, and the difficulty in expressing Unicode-supported lexemes, pbpg provides a `lex()` rule. This rule calls a user-supplied lexer function that expects a lexeme and number of characters read, or an error. pbpg can generate stub lexer functions for the user by using the `-stub` flag. By using lexer functions in the specification, pbpg itself maintains the state of what is expected in the token stream, leaving _just_ the actual lexing to the user. 
 
