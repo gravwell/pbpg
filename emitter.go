@@ -333,22 +333,26 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 
 	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() (err error) {\n", *fPrefix, name))
 
+	if *fDebug {
+		p.out.WriteString(fmt.Sprintf("log.Println(\"state%v\")\n", name))
+	}
+
 	p.visitExpression(exp)
 
 	if a != "" {
-		p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(p.lastLiteral, p.lexeme) }\n\n", name))
+		p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(p.lastWhitespace, p.lastLiteral, p.lexeme) }\n\n", name))
 	}
 	if e != "" {
-		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err, p.lastLiteral, p.lexeme, p.pos, p.position()) }\n\n", name))
+		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err, p.lastWhitespace, p.lastLiteral, p.lexeme, p.pos, p.position()) }\n\n", name))
 	}
 
 	p.out.WriteString("return err\n}\n\n")
 
 	if a != "" {
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(lit, lex string) { %v\n}\n\n", *fPrefix, name, a))
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(whitespace bool, lit, lex string) { %v\n}\n\n", *fPrefix, name, a))
 	}
 	if e != "" {
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(err error, lit, lex string, pos int, position string) error {\n%v\n}\n\n", *fPrefix, name, e))
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(err error, whitespace bool, lit, lex string, pos int, position string) error {\n%v\n}\n\n", *fPrefix, name, e))
 	}
 }
 
@@ -444,6 +448,7 @@ type _PREFIX_Parser struct {
 	Data        *_PREFIX_Data
 	lastErr error
 	lastLiteral string
+	lastWhitespace bool
 
 	predictStack []*_PREFIX_Parser
 }
@@ -487,6 +492,7 @@ func (p *_PREFIX_Parser) literal(want string) error {
 	if strings.HasPrefix(p.input[p.pos+count:], want) {
 		p.pos += count + len(want)
 		p.lastLiteral = want
+		p.lastWhitespace = count > 0
 		return nil
 	}
 

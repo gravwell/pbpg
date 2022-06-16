@@ -81,13 +81,13 @@ func (p *pbpgParser) stateHeader() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionHeader(p.lastLiteral, p.lexeme)
+		p.Data.actionHeader(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionHeader(lit, lex string) {
+func (p *pbpgData) actionHeader(whitespace bool, lit, lex string) {
 	p.out.WriteString(doNotModify)
 	p.out.WriteString(p.popCode())
 }
@@ -147,13 +147,13 @@ func (p *pbpgParser) stateProduction() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionProduction(p.lastLiteral, p.lexeme)
+		p.Data.actionProduction(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionProduction(lit, lex string) {
+func (p *pbpgData) actionProduction(whitespace bool, lit, lex string) {
 	if p.stateMap == nil {
 		p.stateMap = make(map[string]*Expression)
 	}
@@ -181,13 +181,13 @@ func (p *pbpgParser) stateAction() (err error) {
 		err = p.stateCodeBlock()
 	}
 	if err == nil {
-		p.Data.actionAction(p.lastLiteral, p.lexeme)
+		p.Data.actionAction(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionAction(lit, lex string) {
+func (p *pbpgData) actionAction(whitespace bool, lit, lex string) {
 	p.sAction = p.popCode()
 }
 
@@ -198,13 +198,13 @@ func (p *pbpgParser) stateError() (err error) {
 		err = p.stateCodeBlock()
 	}
 	if err == nil {
-		p.Data.actionError(p.lastLiteral, p.lexeme)
+		p.Data.actionError(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionError(lit, lex string) {
+func (p *pbpgData) actionError(whitespace bool, lit, lex string) {
 	p.sError = p.popCode()
 }
 
@@ -242,13 +242,13 @@ func (p *pbpgParser) stateExpression() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionExpression(p.lastLiteral, p.lexeme)
+		p.Data.actionExpression(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionExpression(lit, lex string) {
+func (p *pbpgData) actionExpression(whitespace bool, lit, lex string) {
 	p.expression = &Expression{
 		alternatives: p.alternatives,
 	}
@@ -275,13 +275,13 @@ func (p *pbpgParser) stateAlternative() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionAlternative(p.lastLiteral, p.lexeme)
+		p.Data.actionAlternative(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionAlternative(lit, lex string) {
+func (p *pbpgData) actionAlternative(whitespace bool, lit, lex string) {
 	p.alternatives = append(p.alternatives, &Alternative{terms: p.terms})
 	p.terms = nil
 
@@ -306,13 +306,13 @@ func (p *pbpgParser) stateTerm() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionTerm(p.lastLiteral, p.lexeme)
+		p.Data.actionTerm(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionTerm(lit, lex string) {
+func (p *pbpgData) actionTerm(whitespace bool, lit, lex string) {
 	t := &Term{option: p.popLastTerm()}
 	switch t.option {
 	case TERM_NAME:
@@ -338,13 +338,13 @@ func (p *pbpgParser) stateGroup() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionGroup(p.lastLiteral, p.lexeme)
+		p.Data.actionGroup(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionGroup(lit, lex string) {
+func (p *pbpgData) actionGroup(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_GOR)
 	p.pushGOR(&GOR{option: GOR_GROUP, expression: p.expression})
 	p.expression = nil
@@ -361,13 +361,13 @@ func (p *pbpgParser) stateOption() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionOption(p.lastLiteral, p.lexeme)
+		p.Data.actionOption(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionOption(lit, lex string) {
+func (p *pbpgData) actionOption(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_GOR)
 	p.pushGOR(&GOR{option: GOR_OPTION, expression: p.expression})
 	p.expression = nil
@@ -384,13 +384,13 @@ func (p *pbpgParser) stateRepetition() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionRepetition(p.lastLiteral, p.lexeme)
+		p.Data.actionRepetition(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionRepetition(lit, lex string) {
+func (p *pbpgData) actionRepetition(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_GOR)
 	p.pushGOR(&GOR{option: GOR_REPETITION, expression: p.expression})
 	p.expression = nil
@@ -410,13 +410,13 @@ func (p *pbpgParser) stateLex() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionLex(p.lastLiteral, p.lexeme)
+		p.Data.actionLex(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionLex(lit, lex string) {
+func (p *pbpgData) actionLex(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_LEX)
 
 }
@@ -431,13 +431,13 @@ func (p *pbpgParser) stateLiteral() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionLiteral(p.lastLiteral, p.lexeme)
+		p.Data.actionLiteral(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionLiteral(lit, lex string) {
+func (p *pbpgData) actionLiteral(whitespace bool, lit, lex string) {
 	p.pushLiteral(p.popString())
 }
 
@@ -455,13 +455,13 @@ func (p *pbpgParser) stateCode() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionCode(p.lastLiteral, p.lexeme)
+		p.Data.actionCode(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionCode(lit, lex string) {
+func (p *pbpgData) actionCode(whitespace bool, lit, lex string) {
 	p.pushCode(lex)
 }
 
@@ -481,13 +481,13 @@ func (p *pbpgParser) stateComment() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionComment(p.lastLiteral, p.lexeme)
+		p.Data.actionComment(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionComment(lit, lex string) {
+func (p *pbpgData) actionComment(whitespace bool, lit, lex string) {
 	p.out.WriteString("// " + lex + "\n")
 }
 
@@ -504,13 +504,13 @@ func (p *pbpgParser) stateName() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionName(p.lastLiteral, p.lexeme)
+		p.Data.actionName(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionName(lit, lex string) {
+func (p *pbpgData) actionName(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_NAME)
 	p.pushName(lex)
 }
@@ -528,13 +528,13 @@ func (p *pbpgParser) stateLexFunction() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionLexFunction(p.lastLiteral, p.lexeme)
+		p.Data.actionLexFunction(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionLexFunction(lit, lex string) {
+func (p *pbpgData) actionLexFunction(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_NAME)
 	p.pushName(lex)
 }
@@ -552,13 +552,13 @@ func (p *pbpgParser) stateString() (err error) {
 		}
 	}
 	if err == nil {
-		p.Data.actionString(p.lastLiteral, p.lexeme)
+		p.Data.actionString(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionString(lit, lex string) {
+func (p *pbpgData) actionString(whitespace bool, lit, lex string) {
 	p.pushLastTerm(TERM_LITERAL)
 	p.pushString(lex)
 }
@@ -576,13 +576,14 @@ func Parsepbpg(input string) (*pbpgParser, error) {
 }
 
 type pbpgParser struct {
-	input       string
-	pos         int
-	lineOffsets []int
-	lexeme      string
-	Data        *pbpgData
-	lastErr     error
-	lastLiteral string
+	input          string
+	pos            int
+	lineOffsets    []int
+	lexeme         string
+	Data           *pbpgData
+	lastErr        error
+	lastLiteral    string
+	lastWhitespace bool
 
 	predictStack []*pbpgParser
 }
@@ -626,6 +627,7 @@ func (p *pbpgParser) literal(want string) error {
 	if strings.HasPrefix(p.input[p.pos+count:], want) {
 		p.pos += count + len(want)
 		p.lastLiteral = want
+		p.lastWhitespace = count > 0
 		return nil
 	}
 
@@ -639,7 +641,7 @@ func (p *pbpgParser) predict() *pbpgParser {
 		pos:          p.pos,
 		lineOffsets:  p.lineOffsets,
 		lexeme:       p.lexeme,
-		Data:         &pbpgData{},
+		Data:         p.Data.fork(),
 		predictStack: p.predictStack,
 		lastErr:      p.lastErr,
 	}

@@ -23,6 +23,7 @@ import (
 var (
 	fPrefix = flag.String("prefix", "pbpg", "Prefix for user parser, data structs, and filename.")
 	fStub   = flag.Bool("stub", false, "Write lexer/merge/data stub to <prefix>Data.go")
+	fDebug  = flag.Bool("debug", false, "Enable debug output to stderr in the generated parser.")
 )
 
 const (
