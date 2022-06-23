@@ -419,7 +419,7 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 
 	for i, v := range exp.alternatives {
 		if needPos {
-			p.out.WriteString(fmt.Sprintf("a%vPos = %v\n", aCount, i))
+			p.out.WriteString(fmt.Sprintf("a%vPos = %v\n", aCount, i+1))
 		}
 		vCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
 		if i < len(exp.alternatives)-1 {

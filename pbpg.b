@@ -11,7 +11,6 @@ import (
 
 }
 
-type String string
 type Code string
 type Literal string
 type Lex string
@@ -25,6 +24,7 @@ type CodeBlock string
 type Error string
 type Action string
 type Name string
+type QuotedString string
 
 # The top level production is the initial state to attempt to reduce.
 
@@ -43,16 +43,7 @@ Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .		Action {
 											}
 											p.stateMap[v1] = v3
 											
-											a, err := p.patchTypes(v3, v5)
-											if err != nil {
-												log.Fatal(err)
-											}
-											e, err := p.patchTypes(v3, v6)
-											if err != nil {
-												log.Fatal(err)
-											}
-
-											p.emitState(v1, v3, a, e)
+											p.emitState(v1, v3, v5, v6)
 
 											if p.entryPoint == "" {
 												p.entryPoint = v1
@@ -61,27 +52,35 @@ Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .		Action {
 Action      = "Action" CodeBlock .						Action { return v2; }
 Error       = "Error" CodeBlock .						Action { return v2; }
 CodeBlock   = "{" Code "}" .							Action { return v2; }
-Expression  = Alternative { "|" Alternative } .					Action { return &Expression{ alternatives: append([]*Alternative, v1, v3...)}; }
-Alternative = Term { Term } .							Action { return &Alternative{terms: append([]*Term, v1, v2...)}; }
+Expression  = Alternative { "|" Alternative } .					Action { return &Expression{ alternatives: append([]*Alternative{v1}, v3...)}; }
+Alternative = Term { Term } .							Action { return &Alternative{terms: append([]*Term{v1}, v2...)}; }
 Term        = Lex | Name | Literal | Group | Option | Repetition .		Action { 
-											t := &Term{
-												option: vP1,
-											}
-											switch t.option {
+											t := &Term{}
+											switch a1Pos {
 												case 1:
-													t.Lex = v1	
+													t.lex = v1	
+													t.option = TERM_LEX
 												case 2:
-													t.Name = v1
+													t.name = v2
+													t.option = TERM_NAME
 												case 3:
-													t.Literal = v1
-												case 4, 5, 6:
-													t.GOR = v1
+													t.literal = v3
+													t.option = TERM_LITERAL
+												case 4:
+													t.gor = v4
+													t.option = TERM_GOR
+												case 5:
+													t.gor = v5
+													t.option = TERM_GOR
+												case 6: 
+													t.gor = v6
+													t.option = TERM_GOR
 											}
 											return t
 										}
-Group       = "(" Expression ")" .						Action { return &GOR{ option: TYPE_GROUP, expression: v2}; }
-Option      = "[" Expression "]" .						Action { return &GOR{ option: TYPE_OPTION, expression: v2}; }
-Repetition  = "{" Expression "}" .						Action { return &GOR{ option: TYPE_REPETITION, expression: v2}; }
+Group       = "(" Expression ")" .						Action { return &GOR{ option: GOR_GROUP, expression: v2}; }
+Option      = "[" Expression "]" .						Action { return &GOR{ option: GOR_OPTION, expression: v2}; }
+Repetition  = "{" Expression "}" .						Action { return &GOR{ option: GOR_REPETITION, expression: v2}; }
 Lex         = "lex" "(" lex(functionname) ")" .					Action { return v3; }
 Literal     = "\"" QuotedString "\"" .						Action { return v2; }
 Name	    = lex(name) .							Action { return v1; }

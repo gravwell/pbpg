@@ -366,22 +366,22 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 	var v4 *GOR
 	var v5 *GOR
 	var v6 *GOR
-	a1Pos = 0
+	a1Pos = 1
 	v1, err = p.stateLex()
 	if err != nil {
-		a1Pos = 1
+		a1Pos = 2
 		v2, err = p.stateName()
 		if err != nil {
-			a1Pos = 2
+			a1Pos = 3
 			v3, err = p.stateLiteral()
 			if err != nil {
-				a1Pos = 3
+				a1Pos = 4
 				v4, err = p.stateGroup()
 				if err != nil {
-					a1Pos = 4
+					a1Pos = 5
 					v5, err = p.stateOption()
 					if err != nil {
-						a1Pos = 5
+						a1Pos = 6
 						v6, err = p.stateRepetition()
 					}
 				}
@@ -396,22 +396,26 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 }
 
 func (p *pbpgData) actionTerm(a1Pos int, v1 string, v2 string, v3 string, v4 *GOR, v5 *GOR, v6 *GOR) *Term {
-	t := &Term{
-		option: a1Pos,
-	}
-	switch t.option {
+	t := &Term{}
+	switch a1Pos {
 	case 1:
 		t.lex = v1
+		t.option = TERM_LEX
 	case 2:
 		t.name = v2
+		t.option = TERM_NAME
 	case 3:
 		t.literal = v3
+		t.option = TERM_LITERAL
 	case 4:
 		t.gor = v4
+		t.option = TERM_GOR
 	case 5:
 		t.gor = v5
+		t.option = TERM_GOR
 	case 6:
 		t.gor = v6
+		t.option = TERM_GOR
 	}
 	return t
 
