@@ -86,82 +86,87 @@ go run Calc.go "5+(10*2*(30/5))"
 		"unicode"
 	)
 
+	type CalcData struct {}
+
 	func main() {
-		p, err := ParseCalc(os.Args[1])
+		result, err := ParseCalc(os.Args[1], nil)
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(p.Data.numbers[0])
+		fmt.Println(result)
 	} 
-
-	type CalcData struct {
-		digits		[]string
-		numbers 	[]int
-		negative 	bool
-		op 		string
-	}
-
-	func (p *CalcData) fork() *CalcData {
-		return &CalcData{}
-	}
-		
-	func (a *CalcData) merge(b *CalcData) {
-		switch b.op {
-		case "+":
-			l := a.pop()
-			r := b.pop()
-			a.numbers = append(a.numbers, l+r)
-		case "-":
-			l := a.pop()
-			r := b.pop()
-			a.numbers = append(a.numbers, l-r)
-		case "*":
-			l := a.pop()
-			r := b.pop()
-			a.numbers = append(a.numbers, l*r)
-		case "/":
-			l := a.pop()
-			r := b.pop()
-			a.numbers = append(a.numbers, l/r)
-		default:
-			a.numbers = append(a.numbers, b.numbers...)
-			if b.negative {
-				a.negative = true
-			}
-			a.digits = append(a.digits, b.digits...)
-		}
-	}
-
-	func (p *CalcData) pop() int {
-		i := p.numbers[len(p.numbers)-1]
-		p.numbers = p.numbers[:len(p.numbers)-1]
-		return i
-	}
 }
 
+type Expression int
+type Term int
+type Factor int
+type AddOp string
+type MultOp string
+type Number int
+type Neg string
+type Digit string
 
-Expression 	= Term { AddOp Term } .			
-Term 		= Factor { MultOp Factor } .		
-Factor		= "(" Expression ")" | Number .		
-AddOp 		= "+" | "-" .				Action { p.op = lit } Error { return fmt.Errorf("expected operator") }
-MultOp 		= "*" | "/" .				Action { p.op = lit } Error { return fmt.Errorf("expected operator") }
-Number 		= [ Neg ] Digit { Digit } .		Action {
-								sNum := strings.Join(p.digits, "")
-								num, _ := strconv.Atoi(sNum)
-								if p.negative {
-									num = -num
-									p.negative = false
+Expression 	= Term { AddOp Term } .			Action {
+								r := v1
+								for i, v := range v2 {
+									switch v {
+									case "+":
+										r = r + v3[i]
+									case "-":
+										r = r - v3[i]
+									}
 								}
-								p.numbers = append(p.numbers, num)
+
+								return r
 							}
-							Error {
-								return fmt.Errorf("expected '-' or a digit at position %v, got %v", pos, os.Args[1][pos-1])
+Term 		= Factor { MultOp Factor } .		Action {
+								r := v1
+								for i, v := range v2 {
+									switch v {
+									case "*":
+										r = r * v3[i]
+									case "/":
+										r = r / v3[i]
+									}
+								}
+								return r
 							}
-Neg		= "-" .					Action {
-								p.negative = true
+Factor		= ( "(" Expression ")" ) | Number .	Action {
+								var r int
+								switch a1Pos {
+								case 1:
+									r = v2
+								case 2:
+									r = v4
+								}
+								return r
 							}
+AddOp 		= "+" | "-" .				Action {
+								var r string
+								switch a1Pos {
+								case 1:
+									r = v1
+								case 2:
+									r = v2
+								}
+								return r
+							}
+MultOp 		= "*" | "/" .				Action { 
+								var r string
+								switch a1Pos {
+								case 1:
+									r = v1
+								case 2:
+									r = v2
+								}
+								return r
+							}
+Number 		= [ Neg ] Digit { Digit } .		Action {
+								stringNumber := v1 + v2 + strings.Join(v3, "")
+								num, _ := strconv.Atoi(stringNumber)
+								return num
+							}
+Neg		= "-" .					Action { return v1 }
 Digit 		= "0" | "1" | "2" | "3" | "4" | 
-	  	  "5" | "6" | "7" | "8" | "9" . 	Action { 
-								p.digits = append(p.digits, lit) 
-							}	
+	  	  "5" | "6" | "7" | "8" | "9" . 	Action { return fmt.Sprintf("%v", a1Pos-1) }
 ```

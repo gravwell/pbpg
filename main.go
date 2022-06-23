@@ -59,11 +59,18 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	data.out.WriteString(strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint))
+	h := strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint)
+
+	// if the top level production has a type, then we have the parser return it
+	if ftype, ok := data.typeMap[data.entryPoint]; ok {
+		data.out.WriteString(fmt.Sprintf(h, "("+ftype+", error)", "ret, err", "return ret, p.lastErr", "return ret, err"))
+	} else {
+		data.out.WriteString(fmt.Sprintf(h, "error", "err", "return p.lastErr", "return err"))
+	}
 
 	formatted, err := format.Source([]byte(data.out.String()))
 	if err != nil {
-		fmt.Println(data.out.String())
+		fmt.Println("uh", data.out.String())
 		log.Fatalln(err)
 	}
 

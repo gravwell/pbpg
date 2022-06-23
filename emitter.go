@@ -384,7 +384,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if pa != "" {
 			args = ", " + pa
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err $v) }\n\n", name, args))
+		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err %v) }\n\n", name, args))
 	}
 
 	if hasType {
@@ -460,7 +460,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 					p.out.WriteString(fmt.Sprintf("v%v, err = p.state%v()\n", vCount, term.name))
 				}
 			} else {
-				p.out.WriteString(fmt.Sprintf("_, err = p.state%v()\n", vCount, term.name))
+				p.out.WriteString(fmt.Sprintf("_, err = p.state%v()\n", term.name))
 			}
 			vCount++
 		} else {
@@ -478,7 +478,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 				p.out.WriteString(fmt.Sprintf("v%v, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
 			}
 		} else {
-			p.out.WriteString(fmt.Sprintf("_, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
+			p.out.WriteString(fmt.Sprintf("_, err = p.literal(%v)\n", strconv.Quote(term.literal)))
 		}
 		vCount++
 	case TERM_GOR:
@@ -533,16 +533,17 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 }
 
 var header = `
-func Parse_PREFIX_(input string, data *_PREFIX_Data) error {
+func Parse_PREFIX_(input string, data *_PREFIX_Data) %v {
 	p := new_PREFIX_Parser(input, data)
 
-	err := p.state_ENTRYPOINT_()
+	%v := p.state_ENTRYPOINT_()
 	if err == nil {
 		if strings.TrimSpace(p.input[p.pos:]) != "" {
-			return p.lastErr
+			%v
 		}
 	}
-	return err
+	
+	%v 
 }
 
 type _PREFIX_Parser struct {
