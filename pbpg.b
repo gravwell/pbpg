@@ -11,25 +11,26 @@ import (
 
 }
 
-#type String string
-#type Code string
-#type Literal string
-#type Lex string
-#type Repetition *GOR
-#type Option *GOR
-#type Group *GOR
-#type Term *Term
-#type Alternative *Alternative
-#type Expression *Expression
-#type CodeBlock string
-#type Error string
-#type Action string
+type String string
+type Code string
+type Literal string
+type Lex string
+type Repetition *GOR
+type Option *GOR
+type Group *GOR
+type Term *Term
+type Alternative *Alternative
+type Expression *Expression
+type CodeBlock string
+type Error string
+type Action string
+type Name string
 
 # The top level production is the initial state to attempt to reduce.
 
-Program     = [ Comment { Comment } ] [ Header ] { Types } Line { Line } .
+Program     = { Comment } [ Header ] { Types } Line { Line } .
 Header      = CodeBlock .							Action { p.out.WriteString(doNotModify); p.out.WriteString(v1) }
-Types       = "type" String String .						Action {
+Types       = "type" Name lex(type) .						Action {
 											if _, ok := p.typeMap[v2]; ok {
 												log.Fatalf("type %v redeclared", v2)
 											}
@@ -81,12 +82,12 @@ Term        = Lex | Name | Literal | Group | Option | Repetition .		Action {
 Group       = "(" Expression ")" .						Action { return &GOR{ option: TYPE_GROUP, expression: v2}; }
 Option      = "[" Expression "]" .						Action { return &GOR{ option: TYPE_OPTION, expression: v2}; }
 Repetition  = "{" Expression "}" .						Action { return &GOR{ option: TYPE_REPETITION, expression: v2}; }
-Lex         = "lex" "(" String ")" .						Action { return v3; }
-Literal     = "\"" String "\"" .						Action { return v2; }
-Name	    = String .								Action { return v1; }
+Lex         = "lex" "(" lex(functionname) ")" .					Action { return v3; }
+Literal     = "\"" QuotedString "\"" .						Action { return v2; }
+Name	    = lex(name) .							Action { return v1; }
 
 # Lexer directives. 
 
-Code        = lex(code) .							Action { return v1; }
-String      = lex(string) .							Action { return v1; }
-Comment     = "#" lex(comment) .						Action { p.out.WriteString("// " + v2) }
+Code        	= lex(code) .							Action { return v1; }
+QuotedString    = lex(quotedstring) .						Action { return v1; }
+Comment     	= "#" lex(comment) .						Action { p.out.WriteString("// " + v2 + "\n") }

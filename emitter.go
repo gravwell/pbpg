@@ -155,8 +155,7 @@ func (e *Expression) variables() []*Variable {
 				})
 			case TERM_LITERAL:
 				r = append(r, &Variable{
-					T:     TERM_LITERAL,
-					Value: t.literal,
+					T: TERM_LITERAL,
 				})
 			case TERM_LEX:
 				r = append(r, &Variable{
@@ -208,7 +207,7 @@ func (p *pbpgData) positionalArgs(exp *Expression) string {
 			c++
 		}
 	}
-	return strings.TrimRight(r, ",")
+	return strings.TrimSuffix(r, ",")
 }
 
 func (p *pbpgData) functionSignature(exp *Expression) string {
@@ -228,7 +227,7 @@ func (p *pbpgData) functionSignature(exp *Expression) string {
 			c++
 		}
 	}
-	return strings.TrimRight(r, ",")
+	return strings.TrimSuffix(r, ",")
 }
 
 // An alternative contains one or more terms.
@@ -293,15 +292,16 @@ func (g *GOR) String() string {
 // state function and walks the given expression (via the visit* functions) to
 // write the logic for the production.
 func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
+	fmt.Println(p.typeMap)
 	// make the comment of the current production
 	p.out.WriteString(fmt.Sprintf("// %v = %v\n", name, exp.String()))
 
 	ftype, hasType := p.typeMap[name]
 	var retType string
 	if hasType {
-		retType = ", " + ftype
+		retType = ftype + ", "
 	}
-	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() ($v error) {\nvar err error\n", *fPrefix, name, retType))
+	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() (%v error) {\nvar err error\n", *fPrefix, name, retType))
 
 	if hasType {
 		p.out.WriteString(fmt.Sprintf("var ret %v\n", ftype))
@@ -504,6 +504,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		lineOffsets: p.lineOffsets,
 		predictStack: p.predictStack,
 		lastErr: p.lastErr,
+		Data: p.Data,
 	}
 }
 

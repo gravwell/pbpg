@@ -38,26 +38,32 @@ func main() {
 		log.Fatalln("need filename")
 	}
 
-	data, err := os.ReadFile(flag.Arg(0))
+	input, err := os.ReadFile(flag.Arg(0))
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	p, err := Parsepbpg(string(data))
+	data := &pbpgData{
+		typeMap:    make(map[string]string),
+		stateMap:   make(map[string]*Expression),
+		statesUsed: make(map[string]bool),
+	}
+	err = Parsepbpg(string(input), data)
+	if err != nil {
+		fmt.Println(data.out.String())
+		log.Fatalln(err)
+	}
+
+	err = data.verify()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	err = p.Data.verify()
-	if err != nil {
-		log.Fatalln(err)
-	}
+	data.out.WriteString(strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint))
 
-	p.Data.out.WriteString(strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, p.Data.entryPoint))
-
-	formatted, err := format.Source([]byte(p.Data.out.String()))
+	formatted, err := format.Source([]byte(data.out.String()))
 	if err != nil {
-		fmt.Println(p.Data.out.String())
+		fmt.Println(data.out.String())
 		log.Fatalln(err)
 	}
 
@@ -65,7 +71,7 @@ func main() {
 
 	if *fStub {
 		funcs := make(map[string]bool)
-		for _, v := range p.Data.stateMap {
+		for _, v := range data.stateMap {
 			m := lexFunctions(v)
 			for k, _ := range m {
 				funcs[k] = true

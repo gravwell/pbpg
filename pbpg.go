@@ -109,9 +109,18 @@ func (p *pbpgParser) stateTypes() (err error) {
 	var v3 string
 	v1, err = p.literal("type")
 	if err == nil {
-		v2, err = p.stateString()
+		v2, err = p.stateName()
 		if err == nil {
-			v3, err = p.stateString()
+			{
+				n, lexeme, lerr := p.Data.lextype(p.input[p.pos:])
+				p.pos += n
+				if lerr != nil {
+					err = fmt.Errorf("%v: %w", p.position(), lerr)
+				} else {
+					err = nil
+					v3 = lexeme
+				}
+			}
 		}
 	}
 	if err == nil {
@@ -398,18 +407,20 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 }
 
 func (p *pbpgData) actionTerm(v1pos int, v1 interface{}) *Term {
-	t := &Term{
-		option: v1pos,
-	}
-	switch t.option {
+	t := &Term{}
+	switch v1pos {
 	case 1:
 		t.lex = v1.(string)
+		t.option = TERM_LEX
 	case 2:
 		t.name = v1.(string)
+		t.option = TERM_NAME
 	case 3:
 		t.literal = v1.(string)
+		t.option = TERM_LITERAL
 	case 4, 5, 6:
 		t.gor = v1.(*GOR)
+		t.option = TERM_GOR
 	}
 	return t
 
@@ -506,7 +517,16 @@ func (p *pbpgParser) stateLex() (string, error) {
 	if err == nil {
 		v2, err = p.literal("(")
 		if err == nil {
-			v3, err = p.stateString()
+			{
+				n, lexeme, lerr := p.Data.lexname(p.input[p.pos:])
+				p.pos += n
+				if lerr != nil {
+					err = fmt.Errorf("%v: %w", p.position(), lerr)
+				} else {
+					err = nil
+					v3 = lexeme
+				}
+			}
 			if err == nil {
 				v4, err = p.literal(")")
 			}
@@ -533,7 +553,7 @@ func (p *pbpgParser) stateLiteral() (string, error) {
 
 	v1, err = p.literal("\"")
 	if err == nil {
-		v2, err = p.stateString()
+		v2, err = p.stateQuotedString()
 		if err == nil {
 			v3, err = p.literal("\"")
 		}
@@ -554,7 +574,16 @@ func (p *pbpgParser) stateName() (string, error) {
 	var err error
 	var ret string
 	var v1 string
-	v1, err = p.stateString()
+	{
+		n, lexeme, lerr := p.Data.lexname(p.input[p.pos:])
+		p.pos += n
+		if lerr != nil {
+			err = fmt.Errorf("%v: %w", p.position(), lerr)
+		} else {
+			err = nil
+			v1 = lexeme
+		}
+	}
 	if err == nil {
 		ret = p.Data.actionName(v1)
 	}
@@ -594,12 +623,12 @@ func (p *pbpgData) actionCode(v1 string) string {
 }
 
 // String = string
-func (p *pbpgParser) stateString() (string, error) {
+func (p *pbpgParser) stateQuotedString() (string, error) {
 	var err error
 	var ret string
 	var v1 string
 	{
-		n, lexeme, lerr := p.Data.lexstring(p.input[p.pos:])
+		n, lexeme, lerr := p.Data.lexquotedstring(p.input[p.pos:])
 		p.pos += n
 		if lerr != nil {
 			err = fmt.Errorf("%v: %w", p.position(), lerr)
@@ -644,39 +673,36 @@ func (p *pbpgParser) stateComment() (err error) {
 }
 
 func (p *pbpgData) actionComment(v1, v2 string) {
-	p.out.WriteString("// " + v2)
+	p.out.WriteString("// " + v2 + "\n")
 }
 
-func Parsepbpg(input string) (*pbpgParser, error) {
-	p := newpbpgParser(input)
+func Parsepbpg(input string, data *pbpgData) error {
+	p := newpbpgParser(input, data)
 
 	err := p.stateProgram()
 	if err == nil {
 		if strings.TrimSpace(p.input[p.pos:]) != "" {
-			return p, p.lastErr
+			return p.lastErr
 		}
 	}
-	return p, err
+	return err
 }
 
 type pbpgParser struct {
-	input          string
-	pos            int
-	lineOffsets    []int
-	lexeme         string
-	Data           *pbpgData
-	lastErr        error
-	lastLiteral    string
-	lastWhitespace bool
+	input       string
+	pos         int
+	lineOffsets []int
+	Data        *pbpgData
+	lastErr     error
 
 	predictStack []*pbpgParser
 }
 
-func newpbpgParser(input string) *pbpgParser {
+func newpbpgParser(input string, data *pbpgData) *pbpgParser {
 	return &pbpgParser{
 		input:       input,
 		lineOffsets: pbpgGenerateLineOffsets(input),
-		Data:        &pbpgData{},
+		Data:        data,
 	}
 }
 
@@ -723,6 +749,7 @@ func (p *pbpgParser) predict() *pbpgParser {
 		pos:          p.pos,
 		lineOffsets:  p.lineOffsets,
 		predictStack: p.predictStack,
+		Data:         p.Data,
 		lastErr:      p.lastErr,
 	}
 }

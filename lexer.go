@@ -92,7 +92,7 @@ func (p *pbpgData) lexfunctionname(input string) (int, string, error) {
 	return p.lexname(input)
 }
 
-func (p *pbpgData) lexstring(input string) (int, string, error) {
+func (p *pbpgData) lexquotedstring(input string) (int, string, error) {
 	// everything up to the closing quote but no leading or trailing
 	// whitespace -- interior whitespace is okay
 	offset := 0
@@ -129,4 +129,19 @@ func (p *pbpgData) lexstring(input string) (int, string, error) {
 		}
 	}
 	return 0, "", fmt.Errorf("could not extract token")
+}
+
+func (p *pbpgData) lextype(input string) (int, string, error) {
+	offset := 0
+	for r, s := getRune(input, offset); s > 0; r, s = getRune(input, offset) {
+		offset += s
+		if r == '\n' {
+			break
+		}
+	}
+	var token string
+	if offset > 0 {
+		token = input[:offset-1]
+	}
+	return offset, token, nil
 }
