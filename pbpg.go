@@ -10,8 +10,21 @@ import (
 	"unicode/utf8"
 )
 
+// type String string
+// type Code string
+// type Literal string
+// type Lex string
+// type Repetition *GOR
+// type Option *GOR
+// type Group *GOR
+// type Term *Term
+// type Alternative *Alternative
+// type Expression *Expression
+// type CodeBlock string
+// type Error string
+// type Action string
 //  The top level production is the initial state to attempt to reduce.
-// Program = [ Comment { Comment } ] [ Header ] Line { Line }
+// Program = [ Comment { Comment } ] [ Header ] { Types } Line { Line }
 func (p *pbpgParser) stateProgram() (err error) {
 	// option
 	p = p.predict()
@@ -50,19 +63,34 @@ func (p *pbpgParser) stateProgram() (err error) {
 			p = p.accept()
 		}
 		if err == nil {
-			err = p.stateLine()
+			// repetition
+			for {
+				p = p.predict()
+				err = p.stateTypes()
+				if err != nil {
+					p = p.backtrack()
+					p.lastErr = err
+					err = nil
+					break
+				} else {
+					p = p.accept()
+				}
+			}
 			if err == nil {
-				// repetition
-				for {
-					p = p.predict()
-					err = p.stateLine()
-					if err != nil {
-						p = p.backtrack()
-						p.lastErr = err
-						err = nil
-						break
-					} else {
-						p = p.accept()
+				err = p.stateLine()
+				if err == nil {
+					// repetition
+					for {
+						p = p.predict()
+						err = p.stateLine()
+						if err != nil {
+							p = p.backtrack()
+							p.lastErr = err
+							err = nil
+							break
+						} else {
+							p = p.accept()
+						}
 					}
 				}
 			}
@@ -71,15 +99,9 @@ func (p *pbpgParser) stateProgram() (err error) {
 	return err
 }
 
-// Header = "{" Code "}"
+// Header = CodeBlock
 func (p *pbpgParser) stateHeader() (err error) {
-	err = p.literal("{")
-	if err == nil {
-		err = p.stateCode()
-		if err == nil {
-			err = p.literal("}")
-		}
-	}
+	err = p.stateCodeBlock()
 	if err == nil {
 		p.Data.actionHeader(p.lastWhitespace, p.lastLiteral, p.lexeme)
 	}
@@ -89,7 +111,31 @@ func (p *pbpgParser) stateHeader() (err error) {
 
 func (p *pbpgData) actionHeader(whitespace bool, lit, lex string) {
 	p.out.WriteString(doNotModify)
-	p.out.WriteString(p.popCode())
+	p.out.WriteString(v1)
+}
+
+// Types = "type" String String
+func (p *pbpgParser) stateTypes() (err error) {
+	err = p.literal("type")
+	if err == nil {
+		err = p.stateString()
+		if err == nil {
+			err = p.stateString()
+		}
+	}
+	if err == nil {
+		p.Data.actionTypes(p.lastWhitespace, p.lastLiteral, p.lexeme)
+	}
+
+	return err
+}
+
+func (p *pbpgData) actionTypes(whitespace bool, lit, lex string) {
+	if _, ok := p.typeMap[v2]; ok {
+		log.Fatalf("type %v redeclared", v2)
+	}
+	p.typeMap[v2] = v3
+
 }
 
 // Line = Comment | Production
@@ -154,22 +200,24 @@ func (p *pbpgParser) stateProduction() (err error) {
 }
 
 func (p *pbpgData) actionProduction(whitespace bool, lit, lex string) {
-	if p.stateMap == nil {
-		p.stateMap = make(map[string]*Expression)
+	if p.stateMap[v1] != nil {
+		log.Fatalf("%v redeclared", v1)
 	}
-	name := p.popName()
-	if p.stateMap[name] != nil {
-		log.Fatalf("%v redeclared", name)
-	}
-	p.stateMap[name] = p.expression
+	p.stateMap[v1] = v3
 
-	p.emitState(name, p.expression, p.sAction, p.sError)
-	p.expression = nil
-	p.sAction = ""
-	p.sError = ""
+	a, err := p.patchTypes(v3, v5)
+	if err != nil {
+		log.Fatal(err)
+	}
+	e, err := p.patchTypes(v3, v6)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	p.emitState(v1, v3, a, e)
 
 	if p.entryPoint == "" {
-		p.entryPoint = name
+		p.entryPoint = v1
 	}
 
 }
@@ -188,7 +236,7 @@ func (p *pbpgParser) stateAction() (err error) {
 }
 
 func (p *pbpgData) actionAction(whitespace bool, lit, lex string) {
-	p.sAction = p.popCode()
+	return v2
 }
 
 // Error = "Error" CodeBlock
@@ -205,7 +253,7 @@ func (p *pbpgParser) stateError() (err error) {
 }
 
 func (p *pbpgData) actionError(whitespace bool, lit, lex string) {
-	p.sError = p.popCode()
+	return v2
 }
 
 // CodeBlock = "{" Code "}"
@@ -217,7 +265,15 @@ func (p *pbpgParser) stateCodeBlock() (err error) {
 			err = p.literal("}")
 		}
 	}
+	if err == nil {
+		p.Data.actionCodeBlock(p.lastWhitespace, p.lastLiteral, p.lexeme)
+	}
+
 	return err
+}
+
+func (p *pbpgData) actionCodeBlock(whitespace bool, lit, lex string) {
+	return v2
 }
 
 // Expression = Alternative { "|" Alternative }
@@ -249,11 +305,7 @@ func (p *pbpgParser) stateExpression() (err error) {
 }
 
 func (p *pbpgData) actionExpression(whitespace bool, lit, lex string) {
-	p.expression = &Expression{
-		alternatives: p.alternatives,
-	}
-	p.alternatives = nil
-
+	return &Expression{alternatives: append([]*Alternative, v1, v3...)}
 }
 
 // Alternative = Term { Term }
@@ -282,9 +334,7 @@ func (p *pbpgParser) stateAlternative() (err error) {
 }
 
 func (p *pbpgData) actionAlternative(whitespace bool, lit, lex string) {
-	p.alternatives = append(p.alternatives, &Alternative{terms: p.terms})
-	p.terms = nil
-
+	return &Alternative{terms: append([]*Term, v1, v2...)}
 }
 
 // Term = Lex | Name | Literal | Group | Option | Repetition
@@ -313,18 +363,20 @@ func (p *pbpgParser) stateTerm() (err error) {
 }
 
 func (p *pbpgData) actionTerm(whitespace bool, lit, lex string) {
-	t := &Term{option: p.popLastTerm()}
-	switch t.option {
-	case TERM_NAME:
-		t.name = p.popName()
-	case TERM_LEX:
-		t.lex = p.popName()
-	case TERM_GOR:
-		t.gor = p.popGOR()
-	case TERM_LITERAL:
-		t.literal = p.popLiteral()
+	t := &Term{
+		option: vP1,
 	}
-	p.terms = append(p.terms, t)
+	switch t.option {
+	case 1:
+		t.Lex = v1
+	case 2:
+		t.Name = v1
+	case 3:
+		t.Literal = v1
+	case 4, 5, 6:
+		t.GOR = v1
+	}
+	return t
 
 }
 
@@ -345,10 +397,7 @@ func (p *pbpgParser) stateGroup() (err error) {
 }
 
 func (p *pbpgData) actionGroup(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_GOR)
-	p.pushGOR(&GOR{option: GOR_GROUP, expression: p.expression})
-	p.expression = nil
-
+	return &GOR{option: TYPE_GROUP, expression: v2}
 }
 
 // Option = "[" Expression "]"
@@ -368,10 +417,7 @@ func (p *pbpgParser) stateOption() (err error) {
 }
 
 func (p *pbpgData) actionOption(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_GOR)
-	p.pushGOR(&GOR{option: GOR_OPTION, expression: p.expression})
-	p.expression = nil
-
+	return &GOR{option: TYPE_OPTION, expression: v2}
 }
 
 // Repetition = "{" Expression "}"
@@ -391,19 +437,16 @@ func (p *pbpgParser) stateRepetition() (err error) {
 }
 
 func (p *pbpgData) actionRepetition(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_GOR)
-	p.pushGOR(&GOR{option: GOR_REPETITION, expression: p.expression})
-	p.expression = nil
-
+	return &GOR{option: TYPE_REPETITION, expression: v2}
 }
 
-// Lex = "lex" "(" LexFunction ")"
+// Lex = "lex" "(" String ")"
 func (p *pbpgParser) stateLex() (err error) {
 	err = p.literal("lex")
 	if err == nil {
 		err = p.literal("(")
 		if err == nil {
-			err = p.stateLexFunction()
+			err = p.stateString()
 			if err == nil {
 				err = p.literal(")")
 			}
@@ -417,8 +460,7 @@ func (p *pbpgParser) stateLex() (err error) {
 }
 
 func (p *pbpgData) actionLex(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_LEX)
-
+	return v3
 }
 
 // Literal = """ String """
@@ -438,7 +480,21 @@ func (p *pbpgParser) stateLiteral() (err error) {
 }
 
 func (p *pbpgData) actionLiteral(whitespace bool, lit, lex string) {
-	p.pushLiteral(p.popString())
+	return v2
+}
+
+// Name = String
+func (p *pbpgParser) stateName() (err error) {
+	err = p.stateString()
+	if err == nil {
+		p.Data.actionName(p.lastWhitespace, p.lastLiteral, p.lexeme)
+	}
+
+	return err
+}
+
+func (p *pbpgData) actionName(whitespace bool, lit, lex string) {
+	return v1
 }
 
 //  Lexer directives.
@@ -462,7 +518,30 @@ func (p *pbpgParser) stateCode() (err error) {
 }
 
 func (p *pbpgData) actionCode(whitespace bool, lit, lex string) {
-	p.pushCode(lex)
+	return v1
+}
+
+// String = string
+func (p *pbpgParser) stateString() (err error) {
+	{
+		n, lexeme, lerr := p.Data.lexstring(p.input[p.pos:])
+		p.pos += n
+		if lerr != nil {
+			err = fmt.Errorf("%v: %w", p.position(), lerr)
+		} else {
+			err = nil
+			p.lexeme = lexeme
+		}
+	}
+	if err == nil {
+		p.Data.actionString(p.lastWhitespace, p.lastLiteral, p.lexeme)
+	}
+
+	return err
+}
+
+func (p *pbpgData) actionString(whitespace bool, lit, lex string) {
+	return v1
 }
 
 // Comment = "#" comment
@@ -488,79 +567,7 @@ func (p *pbpgParser) stateComment() (err error) {
 }
 
 func (p *pbpgData) actionComment(whitespace bool, lit, lex string) {
-	p.out.WriteString("// " + lex + "\n")
-}
-
-// Name = name
-func (p *pbpgParser) stateName() (err error) {
-	{
-		n, lexeme, lerr := p.Data.lexname(p.input[p.pos:])
-		p.pos += n
-		if lerr != nil {
-			err = fmt.Errorf("%v: %w", p.position(), lerr)
-		} else {
-			err = nil
-			p.lexeme = lexeme
-		}
-	}
-	if err == nil {
-		p.Data.actionName(p.lastWhitespace, p.lastLiteral, p.lexeme)
-	}
-
-	return err
-}
-
-func (p *pbpgData) actionName(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_NAME)
-	p.pushName(lex)
-}
-
-// LexFunction = functionname
-func (p *pbpgParser) stateLexFunction() (err error) {
-	{
-		n, lexeme, lerr := p.Data.lexfunctionname(p.input[p.pos:])
-		p.pos += n
-		if lerr != nil {
-			err = fmt.Errorf("%v: %w", p.position(), lerr)
-		} else {
-			err = nil
-			p.lexeme = lexeme
-		}
-	}
-	if err == nil {
-		p.Data.actionLexFunction(p.lastWhitespace, p.lastLiteral, p.lexeme)
-	}
-
-	return err
-}
-
-func (p *pbpgData) actionLexFunction(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_NAME)
-	p.pushName(lex)
-}
-
-// String = string
-func (p *pbpgParser) stateString() (err error) {
-	{
-		n, lexeme, lerr := p.Data.lexstring(p.input[p.pos:])
-		p.pos += n
-		if lerr != nil {
-			err = fmt.Errorf("%v: %w", p.position(), lerr)
-		} else {
-			err = nil
-			p.lexeme = lexeme
-		}
-	}
-	if err == nil {
-		p.Data.actionString(p.lastWhitespace, p.lastLiteral, p.lexeme)
-	}
-
-	return err
-}
-
-func (p *pbpgData) actionString(whitespace bool, lit, lex string) {
-	p.pushLastTerm(TERM_LITERAL)
-	p.pushString(lex)
+	p.out.WriteString("// " + v2)
 }
 
 func Parsepbpg(input string) (*pbpgParser, error) {

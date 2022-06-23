@@ -9,7 +9,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -26,27 +25,18 @@ const (
 )
 
 type pbpgData struct {
+	typeMap  map[string]string
 	stateMap map[string]*Expression // list of productions
 	out      strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
 
 	statesUsed map[string]bool // list of states referenced in terms. Used for grammar validation.
 
 	entryPoint string // The name of the first encountered production.
+}
 
-	// Temporaries. Most of these are arranged as a stack and popped off in actions.
-	sCode    []string
-	sName    []string
-	sAction  string
-	sError   string
-	sLiteral []string
-	sString  []string
-	lastTerm []int
-	gors     []*GOR
-
-	// The current grammar being produced.
-	expression   *Expression
-	alternatives []*Alternative
-	terms        []*Term
+type Variable struct {
+	Value string
+	T     int
 }
 
 // verify does the following:
@@ -119,123 +109,6 @@ func lexFunctions(e *Expression) map[string]bool {
 	return m
 }
 
-func (p *pbpgData) fork() *pbpgData {
-	return &pbpgData{}
-}
-
-// Merge b->a. Essentially all paramters that are stacks get appended into a,
-// and all non-nil (or non empty) values are copied over.
-func (a *pbpgData) merge(b *pbpgData) {
-	a.out.WriteString(b.out.String())
-
-	if a.stateMap == nil {
-		a.stateMap = make(map[string]*Expression)
-	}
-	for k, v := range b.stateMap {
-		if a.stateMap[k] != nil {
-			log.Fatalf("%v redeclared", k)
-		}
-		a.stateMap[k] = v
-	}
-
-	if a.statesUsed == nil {
-		a.statesUsed = make(map[string]bool)
-	}
-	for k, _ := range b.statesUsed {
-		a.statesUsed[k] = true
-	}
-
-	if a.entryPoint == "" {
-		a.entryPoint = b.entryPoint
-	}
-
-	a.sCode = append(a.sCode, b.sCode...)
-	a.sName = append(a.sName, b.sName...)
-	if b.sAction != "" {
-		a.sAction = b.sAction
-	}
-	if b.sError != "" {
-		a.sError = b.sError
-	}
-	a.sLiteral = append(a.sLiteral, b.sLiteral...)
-	a.sString = append(a.sString, b.sString...)
-	a.lastTerm = append(a.lastTerm, b.lastTerm...)
-	a.gors = append(a.gors, b.gors...)
-
-	if b.expression != nil {
-		a.expression = b.expression
-	}
-
-	if b.alternatives != nil {
-		a.alternatives = append(a.alternatives, b.alternatives...)
-	}
-
-	if b.terms != nil {
-		a.terms = append(a.terms, b.terms...)
-	}
-
-}
-
-func (p *pbpgData) pushGOR(g *GOR) {
-	p.gors = append(p.gors, g)
-}
-
-func (p *pbpgData) popGOR() *GOR {
-	r := p.gors[len(p.gors)-1]
-	p.gors = p.gors[:len(p.gors)-1]
-	return r
-}
-
-func (p *pbpgData) pushName(n string) {
-	p.sName = append(p.sName, n)
-}
-
-func (p *pbpgData) popName() string {
-	r := p.sName[len(p.sName)-1]
-	p.sName = p.sName[:len(p.sName)-1]
-	return r
-}
-
-func (p *pbpgData) pushCode(n string) {
-	p.sCode = append(p.sCode, n)
-}
-
-func (p *pbpgData) popCode() string {
-	r := p.sCode[len(p.sCode)-1]
-	p.sCode = p.sCode[:len(p.sCode)-1]
-	return r
-}
-
-func (p *pbpgData) pushLiteral(n string) {
-	p.sLiteral = append(p.sLiteral, n)
-}
-
-func (p *pbpgData) popLiteral() string {
-	r := p.sLiteral[len(p.sLiteral)-1]
-	p.sLiteral = p.sLiteral[:len(p.sLiteral)-1]
-	return r
-}
-
-func (p *pbpgData) pushString(n string) {
-	p.sString = append(p.sString, n)
-}
-
-func (p *pbpgData) popString() string {
-	r := p.sString[len(p.sString)-1]
-	p.sString = p.sString[:len(p.sString)-1]
-	return r
-}
-
-func (p *pbpgData) pushLastTerm(n int) {
-	p.lastTerm = append(p.lastTerm, n)
-}
-
-func (p *pbpgData) popLastTerm() int {
-	r := p.lastTerm[len(p.lastTerm)-1]
-	p.lastTerm = p.lastTerm[:len(p.lastTerm)-1]
-	return r
-}
-
 // An expression as defined by the ebnf in pbpg. Expressions contain one or
 // more Alternatives.
 type Expression struct {
@@ -264,6 +137,98 @@ func (e *Expression) enumerateNames() []string {
 		}
 	}
 	return s
+}
+
+func (e *Expression) variables() []*Variable {
+	var r []*Variable
+
+	// we have to walk the expression tree, generating an in order list of
+	// variables we find.
+
+	for _, a := range e.alternatives {
+		for _, t := range a.terms {
+			switch t.option {
+			case TERM_NAME:
+				r = append(r, &Variable{
+					T:     TERM_NAME,
+					Value: t.name,
+				})
+			case TERM_LITERAL:
+				r = append(r, &Variable{
+					T:     TERM_LITERAL,
+					Value: t.literal,
+				})
+			case TERM_LEX:
+				r = append(r, &Variable{
+					T: TERM_LEX,
+				})
+			case TERM_GOR:
+				r = append(r, t.gor.expression.variables()...)
+			}
+		}
+	}
+
+	return r
+}
+
+func (p *pbpgData) declarators(exp *Expression) string {
+	vars := exp.variables()
+	c := 1
+	var r string
+
+	for _, v := range vars {
+		switch v.T {
+		case TERM_NAME:
+			if ftype, ok := p.typeMap[v.Value]; ok {
+				r += fmt.Sprintf("var v%v %v\n", c, ftype)
+				c++
+			}
+		case TERM_LITERAL, TERM_LEX:
+			r += fmt.Sprintf("var v%v string\n", c)
+			c++
+		}
+	}
+	return r
+}
+
+func (p *pbpgData) positionalArgs(exp *Expression) string {
+	vars := exp.variables()
+	c := 1
+	var r string
+
+	for _, v := range vars {
+		switch v.T {
+		case TERM_NAME:
+			if _, ok := p.typeMap[v.Value]; ok {
+				r += fmt.Sprintf("v%v,", c)
+				c++
+			}
+		case TERM_LITERAL, TERM_LEX:
+			r += fmt.Sprintf("v%v,", c)
+			c++
+		}
+	}
+	return strings.TrimRight(r, ",")
+}
+
+func (p *pbpgData) functionSignature(exp *Expression) string {
+	vars := exp.variables()
+	c := 1
+	var r string
+
+	for _, v := range vars {
+		switch v.T {
+		case TERM_NAME:
+			if ftype, ok := p.typeMap[v.Value]; ok {
+				r += fmt.Sprintf("v%v %v,", c, ftype)
+				c++
+			}
+		case TERM_LITERAL, TERM_LEX:
+			r += fmt.Sprintf("v%v string,", c)
+			c++
+		}
+	}
+	return strings.TrimRight(r, ",")
 }
 
 // An alternative contains one or more terms.
@@ -331,34 +296,60 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 	// make the comment of the current production
 	p.out.WriteString(fmt.Sprintf("// %v = %v\n", name, exp.String()))
 
-	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() (err error) {\n", *fPrefix, name))
+	ftype, hasType := p.typeMap[name]
+	var retType string
+	if hasType {
+		retType = ", " + ftype
+	}
+	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() ($v error) {\nvar err error\n", *fPrefix, name, retType))
+
+	if hasType {
+		p.out.WriteString(fmt.Sprintf("var ret %v\n", ftype))
+	}
+	if p.declarators(exp) != "" {
+		p.out.WriteString(p.declarators(exp))
+	}
 
 	if *fDebug {
 		p.out.WriteString(fmt.Sprintf("log.Println(\"state%v\")\n", name))
 	}
 
-	p.visitExpression(exp)
+	p.visitExpression(1, exp)
 
+	pa := p.positionalArgs(exp)
 	if a != "" {
-		p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(p.lastWhitespace, p.lastLiteral, p.lexeme) }\n\n", name))
+		p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(%v) }\n\n", name, pa))
 	}
 	if e != "" {
-		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err, p.lastWhitespace, p.lastLiteral, p.lexeme, p.pos, p.position()) }\n\n", name))
+		var args string
+		if pa != "" {
+			args = ", " + pa
+		}
+		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err $v) }\n\n", name, args))
 	}
 
-	p.out.WriteString("return err\n}\n\n")
+	if hasType {
+		p.out.WriteString("return ret, err\n}\n\n")
+	} else {
+		p.out.WriteString("return err\n}\n\n")
+	}
 
+	fs := p.functionSignature(exp)
 	if a != "" {
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(whitespace bool, lit, lex string) { %v\n}\n\n", *fPrefix, name, a))
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(%v) { %v\n}\n\n", *fPrefix, name, fs, a))
 	}
 	if e != "" {
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(err error, whitespace bool, lit, lex string, pos int, position string) error {\n%v\n}\n\n", *fPrefix, name, e))
+		var args string
+		if fs != "" {
+			args = ", " + fs
+		}
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(err error %v) error {\n%v\n}\n\n", *fPrefix, name, args, e))
 	}
 }
 
-func (p *pbpgData) visitExpression(exp *Expression) {
+func (p *pbpgData) visitExpression(vCount int, exp *Expression) int {
 	for i, v := range exp.alternatives {
-		p.visitAlternative(v)
+		vCount = p.visitAlternative(vCount, v)
 		if i < len(exp.alternatives)-1 {
 			p.out.WriteString(fmt.Sprintf("if err != nil { \n"))
 		}
@@ -368,11 +359,12 @@ func (p *pbpgData) visitExpression(exp *Expression) {
 			p.out.WriteString("}\n")
 		}
 	}
+	return vCount
 }
 
-func (p *pbpgData) visitAlternative(alt *Alternative) {
+func (p *pbpgData) visitAlternative(vCount int, alt *Alternative) int {
 	for i, v := range alt.terms {
-		p.visitTerm(v)
+		vCount = p.visitTerm(vCount, v)
 		if i < len(alt.terms)-1 {
 			p.out.WriteString("if err == nil {\n")
 		}
@@ -382,49 +374,59 @@ func (p *pbpgData) visitAlternative(alt *Alternative) {
 			p.out.WriteString("}\n")
 		}
 	}
+	return vCount
 }
 
-func (p *pbpgData) visitTerm(term *Term) {
+func (p *pbpgData) visitTerm(vCount int, term *Term) int {
 	switch term.option {
 	case TERM_NAME:
-		p.out.WriteString(fmt.Sprintf("err = p.state%v()\n", term.name))
+		if _, ok := p.typeMap[term.name]; ok {
+			p.out.WriteString(fmt.Sprintf("v%v, err = p.state%v()\n", vCount, term.name))
+			vCount++
+		} else {
+			p.out.WriteString(fmt.Sprintf("err = p.state%v()\n", term.name))
+		}
 		if p.statesUsed == nil {
 			p.statesUsed = make(map[string]bool)
 		}
 		p.statesUsed[term.name] = true
 	case TERM_LITERAL:
-		p.out.WriteString(fmt.Sprintf("err = p.literal(%v)\n", strconv.Quote(term.literal)))
+		p.out.WriteString(fmt.Sprintf("v%v, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
+		vCount++
 	case TERM_GOR:
-		p.visitGOR(term.gor)
+		vCount = p.visitGOR(vCount, term.gor)
 	case TERM_LEX:
-		p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; p.lexeme = lexeme }; };", term.lex))
+		p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; v%v = lexeme }; };", term.lex, vCount))
+		vCount++
 	}
+	return vCount
 }
 
 // Subexpressions, which are visited in groups, must create a new parser, which
 // then attempts to evaluate the expression. If it fails, the parent parser can
 // discard the result (backtracking), or accept it by merging the parser states
 // together.
-func (p *pbpgData) visitGOR(gor *GOR) {
+func (p *pbpgData) visitGOR(vCount int, gor *GOR) int {
 	switch gor.option {
 	case GOR_GROUP:
 		p.out.WriteString("// group\n")
 		p.out.WriteString("p = p.predict()\n")
-		p.visitExpression(gor.expression)
+		vCount = p.visitExpression(vCount, gor.expression)
 		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack() } else { p = p.accept() }\n"))
 	case GOR_OPTION:
 		p.out.WriteString("// option\n")
 		p.out.WriteString("p = p.predict()\n")
-		p.visitExpression(gor.expression)
+		vCount = p.visitExpression(vCount, gor.expression)
 		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil } else { p = p.accept() }\n"))
 	case GOR_REPETITION:
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
 		p.out.WriteString("p = p.predict()\n")
-		p.visitExpression(gor.expression)
+		vCount = p.visitExpression(vCount, gor.expression)
 		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil; break } else { p = p.accept() }\n"))
 		p.out.WriteString("}\n")
 	}
+	return vCount
 }
 
 var header = `
@@ -444,11 +446,8 @@ type _PREFIX_Parser struct {
 	input       string
 	pos         int
 	lineOffsets []int
-	lexeme      string
 	Data        *_PREFIX_Data
 	lastErr error
-	lastLiteral string
-	lastWhitespace bool
 
 	predictStack []*_PREFIX_Parser
 }
@@ -483,7 +482,7 @@ func (p *_PREFIX_Parser) position() string {
 	return fmt.Sprintln("impossible line reached", p.pos)
 }
 
-func (p *_PREFIX_Parser) literal(want string) error {
+func (p *_PREFIX_Parser) literal(want string) (string, error) {
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -491,12 +490,10 @@ func (p *_PREFIX_Parser) literal(want string) error {
 
 	if strings.HasPrefix(p.input[p.pos+count:], want) {
 		p.pos += count + len(want)
-		p.lastLiteral = want
-		p.lastWhitespace = count > 0
-		return nil
+		return want, nil
 	}
 
-	return fmt.Errorf("%v: expected \"%v\"", p.position(), want)
+	return "", fmt.Errorf("%v: expected \"%v\"", p.position(), want)
 }
 
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
@@ -505,8 +502,6 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		input: p.input,
 		pos: p.pos,
 		lineOffsets: p.lineOffsets,
-		lexeme: p.lexeme, 
-		Data: p.Data.fork(),
 		predictStack: p.predictStack,
 		lastErr: p.lastErr,
 	}
@@ -522,21 +517,8 @@ func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 func (p *_PREFIX_Parser) accept() *_PREFIX_Parser {
 	pp := p.backtrack()
 	pp.pos = p.pos
-	pp.lexeme = p.lexeme
-	pp.Data.merge(p.Data)
 	return pp
 }
-`
-
-var stubHeader = `
-type _PREFIX_Data struct {}
-
-func (p *_PREFIX_Data) fork() *_PREFIX_Data {
-	return &_PREFIX_Data{}
-}
-
-func (a *_PREFIX_Data) merge(b *_PREFIX_Data) {}
-
 `
 
 var doNotModify = `// generated by pbpg, do not modify

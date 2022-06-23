@@ -74,7 +74,6 @@ func main() {
 
 		var o strings.Builder
 
-		o.WriteString(strings.ReplaceAll(stubHeader, PREFIX, *fPrefix))
 		for k, _ := range funcs {
 			o.WriteString(fmt.Sprintf("func (p *%vData) lex%v(input string) (int, string, error) { return 0, \"\", nil }\n\n", *fPrefix, k))
 		}
