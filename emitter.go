@@ -580,7 +580,7 @@ func _PREFIX_GenerateLineOffsets(input string) []int {
 func (p *_PREFIX_Parser) position() string {
 	for i, v := range p.lineOffsets {
 		if p.pos < v {
-			return fmt.Sprintf("line %v", i)
+			return fmt.Sprintf("line %%v", i)
 		}
 	}
 	return fmt.Sprintln("impossible line reached", p.pos)
@@ -597,7 +597,7 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", fmt.Errorf("%v: expected \"%v\"", p.position(), want)
+	return "", fmt.Errorf("%%v: expected \"%%v\"", p.position(), want)
 }
 
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {

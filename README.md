@@ -9,29 +9,30 @@ pbpg input is specified in an EBNF-like syntax. pbpg is also itself specified us
 ```
 # This is a comment
 
-Program     = [ Comment { Comment } ] [ Header ] Line { Line } .
-Header      = "{" Code "}" .
-Line        = Comment | Production .
-Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .
-Action      = "Action" CodeBlock .
-Error       = "Error" CodeBlock .
-CodeBlock   = "{" Code "}" .						
-Expression  = Alternative { "|" Alternative } .	
-Alternative = Term { Term } .		
-Term        = Lex | Name | Literal | Group | Option | Repetition .
-Group       = "(" Expression ")" .		
-Option      = "[" Expression "]" .	
-Repetition  = "{" Expression "}" .
-Lex         = "lex" "(" LexFunction ")" .
-Literal     = "\"" String "\"" .	
+Program     	= { Comment } [ Header ] { Types } Line { Line } .
+Header      	= "{" Code "}" .
+Types	    	= "type" Name lex(type) .
+Line        	= Comment | Production .
+Production  	= Name "=" [ Expression ] "." [ Action ] [ Error ] .
+Action      	= "Action" CodeBlock .
+Error       	= "Error" CodeBlock .
+CodeBlock   	= "{" Code "}" .						
+Expression  	= Alternative { "|" Alternative } .	
+Alternative 	= Term { Term } .		
+Term        	= Lex | Name | Literal | Group | Option | Repetition .
+Group       	= "(" Expression ")" .		
+Option      	= "[" Expression "]" .	
+Repetition  	= "{" Expression "}" .
+Lex         	= "lex" "(" LexFunction ")" .
+Literal     	= "\"" QuotedString "\"" .	
 
 # lexer rules
 
-Code        = lex(code) .			
-Comment     = "#" lex(comment) .
-Name        = lex(name) .		
-LexFunction = lex(functionname) .
-String      = lex(string) .			
+Code        	= lex(code) .			
+Comment     	= "#" lex(comment) .
+Name        	= lex(name) .		
+LexFunction 	= lex(functionname) .
+QuotedString	= lex(quotedstring) .			
 ```
 
 pbpg creates unambiguous input by using left-to-right precedence, similar to Parsing Expression Grammar (PEG). If multiple paths in the parse tree could be satisfied, the left-most rule is used. For example:
@@ -44,13 +45,13 @@ Given an input "Caterpillar's make terrible pets.", pbpg will match on the first
 
 To avoid both the complexity of maintaining a stateful lexer, and the difficulty in expressing Unicode-supported lexemes, pbpg provides a `lex()` rule. This rule calls a user-supplied lexer function that expects a lexeme and number of characters read, or an error. pbpg can generate stub lexer functions for the user by using the `-stub` flag. By using lexer functions in the specification, pbpg itself maintains the state of what is expected in the token stream, leaving _just_ the actual lexing to the user. 
 
-Actions are code fragments that are executed at the successful reduction of a production, and are specified after a production as `Action { ... }`. All action fragments are executed as functions of a user-supplied data object, and this is where the user can build parse trees, maintain other state, and return data to the code calling the generated parser. pbpg can generate a stub data struct by using the `-stub` flag.
+Actions are code fragments that are executed at the successful reduction of a production, and are specified after a production as `Action { ... }`. All action fragments are executed as functions of a user-supplied data object, and this is where the user can build parse trees, maintain other state, and return data to the code calling the generated parser. Action blocks have access to the elements of the production they are called in by their position, similar to how `yacc` works. Variables in Action blocks are named `v1, v2 ...` and have the concrete type of the type they were specified with in the type declarators. Additionally, groups of alternatives also pass integers indicating which alternative was taken. For example, `foo | bar | baz` will generate variables `v1, v2, v3` and `a1Pos`. `a1Pos` indicates that it's the 1st alternative group in the production, and is a position indicator. `a1Pos` will point to which token (v1, v2, or v3) is valid.
 
 Along with actions, the user can supply an `Error { ... }` code fragment, that will be called in place of a production's default error, if one is encountered. The Error fragment is given the default error, position, pretty-printed position, and the most recently generated lexeme and literal value. This enables the user to directly create more useful errors.
 
 Whitespace *is trimmed* when parsing string literals. "foo" will match on both the input "foo bar" and "   foobar".
 
-Any grammatical element that requires backtracking (repetitions, groups, optional groups), are implemented by creating a new parser, rooted at the current input, and executing it. If the parse fails, backtracking is accomplished by simply discarding the parser. If the parse is successful, the parser state is merged, and a user supplied `merge` function is called to merge any user state with the parent parser. In addition to merging, pbpg calls a user supplied fork function when a new object is created. This allows preloading state in the predictive parser. pbpg can generate both the `merge` and `fork` stubs by using the `-stub` flag.
+Any grammatical element that requires backtracking (repetitions, groups, optional groups), are implemented by creating a new parser, rooted at the current input, and executing it. If the parse fails, backtracking is accomplished by simply discarding the parser. If the parse is successful, the parser state is merged. 
 
 pbpg generates a backtracking recursive descent parser. This means that there are no guarantees to the runtime of the parser, even if the supplied grammar is LL(k). pbpg parsers can take exponential time in the worst case, so care should be taken when expressing a grammar. 
 
