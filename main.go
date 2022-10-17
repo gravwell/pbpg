@@ -1,4 +1,4 @@
-//go:generate pbpg pbpg.g
+//go:generate pbpg pbpg.b
 
 /*************************************************************************
  * Copyright 2022 Gravwell, Inc. All rights reserved.
@@ -24,6 +24,7 @@ var (
 	fPrefix = flag.String("prefix", "pbpg", "Prefix for user parser, data structs, and filename.")
 	fStub   = flag.Bool("stub", false, "Write lexer/merge/data stub to <prefix>Data.go")
 	fDebug  = flag.Bool("debug", false, "Enable debug output to stderr in the generated parser.")
+	fToken  = flag.Bool("token", false, "Use token mode instead of a string based lexer.")
 )
 
 const (
@@ -59,7 +60,12 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	h := strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint)
+	var h string
+	if *fToken {
+		h = strings.ReplaceAll(strings.ReplaceAll(headerTokenMode, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint)
+	} else {
+		h = strings.ReplaceAll(strings.ReplaceAll(header, PREFIX, *fPrefix), ENTRYPOINT, data.entryPoint)
+	}
 
 	// if the top level production has a type, then we have the parser return it
 	if ftype, ok := data.typeMap[data.entryPoint]; ok {
@@ -88,7 +94,11 @@ func main() {
 		var o strings.Builder
 
 		for k, _ := range funcs {
-			o.WriteString(fmt.Sprintf("func (p *%vData) lex%v(input string) (int, string, error) { return 0, \"\", nil }\n\n", *fPrefix, k))
+			if *fToken {
+				o.WriteString(fmt.Sprintf("func (p *%vData) lex%v(input []string) (int, string, error) { return 0, \"\", nil }\n\n", *fPrefix, k))
+			} else {
+				o.WriteString(fmt.Sprintf("func (p *%vData) lex%v(input string) (int, string, error) { return 0, \"\", nil }\n\n", *fPrefix, k))
+			}
 		}
 
 		formatted, err = format.Source([]byte(o.String()))

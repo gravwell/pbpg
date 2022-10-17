@@ -676,6 +676,7 @@ func Parsepbpg(input string, data *pbpgData) error {
 			return p.lastErr
 		}
 	}
+
 	return err
 }
 
