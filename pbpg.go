@@ -383,6 +383,9 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 					if err != nil {
 						a1Pos = 6
 						v6, err = p.stateRepetition()
+						if err != nil {
+							a1Pos = -1
+						}
 					}
 				}
 			}

@@ -424,10 +424,13 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 		vCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
 		if i < len(exp.alternatives)-1 {
 			p.out.WriteString(fmt.Sprintf("if err != nil { \n"))
+		} else if needPos {
+			p.out.WriteString(fmt.Sprintf("if err != nil { \n"))
+			p.out.WriteString(fmt.Sprintf("a%vPos = -1\n", aCount))
 		}
 	}
 	for i, _ := range exp.alternatives {
-		if i < len(exp.alternatives)-1 {
+		if i < len(exp.alternatives)-1 || needPos {
 			p.out.WriteString("}\n")
 		}
 	}
@@ -491,7 +494,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 				p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; v%v = lexeme }; };", term.lex, vCount))
 			}
 		} else {
-			p.out.WriteString(fmt.Sprintf("{ n, _, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; }; };", term.lex, vCount))
+			p.out.WriteString(fmt.Sprintf("{ n, _, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; }; };", term.lex))
 		}
 		vCount++
 	}
