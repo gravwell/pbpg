@@ -25,9 +25,10 @@ const (
 )
 
 type pbpgData struct {
-	typeMap  map[string]string
-	stateMap map[string]*Expression // list of productions
-	out      strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
+	typeMap       map[string]string
+	stateMap      map[string]*Expression // list of productions
+	orderedStates []string               // list of productions in source order
+	out           strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
 
 	statesUsed map[string]bool // list of states referenced in terms. Used for grammar validation.
 

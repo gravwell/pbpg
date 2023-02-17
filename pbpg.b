@@ -42,6 +42,7 @@ Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .		Action {
 												log.Fatalf("%v redeclared", v1)
 											}
 											p.stateMap[v1] = v3
+											p.orderedStates = append(p.orderedStates, v1)
 											
 											p.emitState(v1, v3, v5, v6)
 

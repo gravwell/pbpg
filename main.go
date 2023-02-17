@@ -25,6 +25,7 @@ var (
 	fStub   = flag.Bool("stub", false, "Write lexer/merge/data stub to <prefix>Data.go")
 	fDebug  = flag.Bool("debug", false, "Enable debug output to stderr in the generated parser.")
 	fToken  = flag.Bool("token", false, "Use token mode instead of a string based lexer.")
+	fPrint  = flag.Bool("p", false, "print the formatted grammar to stdout and exit.")
 )
 
 const (
@@ -58,6 +59,11 @@ func main() {
 	err = data.verify()
 	if err != nil {
 		log.Fatalln(err)
+	}
+
+	if *fPrint {
+		fmt.Println(data.PrintGrammar())
+		return
 	}
 
 	var h string

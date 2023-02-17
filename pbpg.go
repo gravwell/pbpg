@@ -10,7 +10,8 @@ import (
 	"unicode/utf8"
 )
 
-//  The top level production is the initial state to attempt to reduce.
+//	The top level production is the initial state to attempt to reduce.
+//
 // Program = { Comment } [ Header ] { Types } Line { Line }
 func (p *pbpgParser) stateProgram() error {
 	var err error
@@ -81,13 +82,13 @@ func (p *pbpgParser) stateHeader() error {
 	var v1 string
 	v1, err = p.stateCodeBlock()
 	if err == nil {
-		p.Data.actionHeader(v1)
+		p.Data.actionHeader(p.pos, v1)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionHeader(v1 string) {
+func (p *pbpgData) actionHeader(pos int, v1 string) {
 	p.out.WriteString(doNotModify)
 	p.out.WriteString(v1)
 }
@@ -115,13 +116,13 @@ func (p *pbpgParser) stateTypes() error {
 		}
 	}
 	if err == nil {
-		p.Data.actionTypes(v1, v2, v3)
+		p.Data.actionTypes(p.pos, v1, v2, v3)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionTypes(v1 string, v2 string, v3 string) {
+func (p *pbpgData) actionTypes(pos int, v1 string, v2 string, v3 string) {
 	if _, ok := p.typeMap[v2]; ok {
 		log.Fatalf("type %v redeclared", v2)
 	}
@@ -192,17 +193,18 @@ func (p *pbpgParser) stateProduction() error {
 		}
 	}
 	if err == nil {
-		p.Data.actionProduction(v1, v2, v3, v4, v5, v6)
+		p.Data.actionProduction(p.pos, v1, v2, v3, v4, v5, v6)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionProduction(v1 string, v2 string, v3 *Expression, v4 string, v5 string, v6 string) {
+func (p *pbpgData) actionProduction(pos int, v1 string, v2 string, v3 *Expression, v4 string, v5 string, v6 string) {
 	if p.stateMap[v1] != nil {
 		log.Fatalf("%v redeclared", v1)
 	}
 	p.stateMap[v1] = v3
+	p.orderedStates = append(p.orderedStates, v1)
 
 	p.emitState(v1, v3, v5, v6)
 
@@ -223,13 +225,13 @@ func (p *pbpgParser) stateAction() (string, error) {
 		v2, err = p.stateCodeBlock()
 	}
 	if err == nil {
-		ret = p.Data.actionAction(v1, v2)
+		ret = p.Data.actionAction(p.pos, v1, v2)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionAction(v1 string, v2 string) string {
+func (p *pbpgData) actionAction(pos int, v1 string, v2 string) string {
 	return v2
 }
 
@@ -244,13 +246,13 @@ func (p *pbpgParser) stateError() (string, error) {
 		v2, err = p.stateCodeBlock()
 	}
 	if err == nil {
-		ret = p.Data.actionError(v1, v2)
+		ret = p.Data.actionError(p.pos, v1, v2)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionError(v1 string, v2 string) string {
+func (p *pbpgData) actionError(pos int, v1 string, v2 string) string {
 	return v2
 }
 
@@ -269,13 +271,13 @@ func (p *pbpgParser) stateCodeBlock() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionCodeBlock(v1, v2, v3)
+		ret = p.Data.actionCodeBlock(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionCodeBlock(v1 string, v2 string, v3 string) string {
+func (p *pbpgData) actionCodeBlock(pos int, v1 string, v2 string, v3 string) string {
 	return v2
 }
 
@@ -310,13 +312,13 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionExpression(v1, v2, v3)
+		ret = p.Data.actionExpression(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionExpression(v1 *Alternative, v2 []string, v3 []*Alternative) *Expression {
+func (p *pbpgData) actionExpression(pos int, v1 *Alternative, v2 []string, v3 []*Alternative) *Expression {
 	return &Expression{alternatives: append([]*Alternative{v1}, v3...)}
 }
 
@@ -345,13 +347,13 @@ func (p *pbpgParser) stateAlternative() (*Alternative, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionAlternative(v1, v2)
+		ret = p.Data.actionAlternative(p.pos, v1, v2)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionAlternative(v1 *Term, v2 []*Term) *Alternative {
+func (p *pbpgData) actionAlternative(pos int, v1 *Term, v2 []*Term) *Alternative {
 	return &Alternative{terms: append([]*Term{v1}, v2...)}
 }
 
@@ -392,13 +394,13 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionTerm(a1Pos, v1, v2, v3, v4, v5, v6)
+		ret = p.Data.actionTerm(p.pos, a1Pos, v1, v2, v3, v4, v5, v6)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionTerm(a1Pos int, v1 string, v2 string, v3 string, v4 *GOR, v5 *GOR, v6 *GOR) *Term {
+func (p *pbpgData) actionTerm(pos int, a1Pos int, v1 string, v2 string, v3 string, v4 *GOR, v5 *GOR, v6 *GOR) *Term {
 	t := &Term{}
 	switch a1Pos {
 	case 1:
@@ -439,13 +441,13 @@ func (p *pbpgParser) stateGroup() (*GOR, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionGroup(v1, v2, v3)
+		ret = p.Data.actionGroup(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionGroup(v1 string, v2 *Expression, v3 string) *GOR {
+func (p *pbpgData) actionGroup(pos int, v1 string, v2 *Expression, v3 string) *GOR {
 	return &GOR{option: GOR_GROUP, expression: v2}
 }
 
@@ -464,13 +466,13 @@ func (p *pbpgParser) stateOption() (*GOR, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionOption(v1, v2, v3)
+		ret = p.Data.actionOption(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionOption(v1 string, v2 *Expression, v3 string) *GOR {
+func (p *pbpgData) actionOption(pos int, v1 string, v2 *Expression, v3 string) *GOR {
 	return &GOR{option: GOR_OPTION, expression: v2}
 }
 
@@ -489,13 +491,13 @@ func (p *pbpgParser) stateRepetition() (*GOR, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionRepetition(v1, v2, v3)
+		ret = p.Data.actionRepetition(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionRepetition(v1 string, v2 *Expression, v3 string) *GOR {
+func (p *pbpgData) actionRepetition(pos int, v1 string, v2 *Expression, v3 string) *GOR {
 	return &GOR{option: GOR_REPETITION, expression: v2}
 }
 
@@ -527,13 +529,13 @@ func (p *pbpgParser) stateLex() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionLex(v1, v2, v3, v4)
+		ret = p.Data.actionLex(p.pos, v1, v2, v3, v4)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionLex(v1 string, v2 string, v3 string, v4 string) string {
+func (p *pbpgData) actionLex(pos int, v1 string, v2 string, v3 string, v4 string) string {
 	return v3
 }
 
@@ -552,13 +554,13 @@ func (p *pbpgParser) stateLiteral() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionLiteral(v1, v2, v3)
+		ret = p.Data.actionLiteral(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionLiteral(v1 string, v2 string, v3 string) string {
+func (p *pbpgData) actionLiteral(pos int, v1 string, v2 string, v3 string) string {
 	return v2
 }
 
@@ -578,17 +580,18 @@ func (p *pbpgParser) stateName() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionName(v1)
+		ret = p.Data.actionName(p.pos, v1)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionName(v1 string) string {
+func (p *pbpgData) actionName(pos int, v1 string) string {
 	return v1
 }
 
-//  Lexer directives.
+//	Lexer directives.
+//
 // Code = code
 func (p *pbpgParser) stateCode() (string, error) {
 	var err error
@@ -605,13 +608,13 @@ func (p *pbpgParser) stateCode() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionCode(v1)
+		ret = p.Data.actionCode(p.pos, v1)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionCode(v1 string) string {
+func (p *pbpgData) actionCode(pos int, v1 string) string {
 	return v1
 }
 
@@ -631,13 +634,13 @@ func (p *pbpgParser) stateQuotedString() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionQuotedString(v1)
+		ret = p.Data.actionQuotedString(p.pos, v1)
 	}
 
 	return ret, err
 }
 
-func (p *pbpgData) actionQuotedString(v1 string) string {
+func (p *pbpgData) actionQuotedString(pos int, v1 string) string {
 	return v1
 }
 
@@ -660,13 +663,13 @@ func (p *pbpgParser) stateComment() error {
 		}
 	}
 	if err == nil {
-		p.Data.actionComment(v1, v2)
+		p.Data.actionComment(p.pos, v1, v2)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionComment(v1 string, v2 string) {
+func (p *pbpgData) actionComment(pos int, v1 string, v2 string) {
 	p.out.WriteString("// " + v2 + "\n")
 }
 
