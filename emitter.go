@@ -375,9 +375,9 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 	pa := p.positionalArgs(exp)
 	if a != "" {
 		if hasType {
-			p.out.WriteString(fmt.Sprintf("if err == nil { ret = p.Data.action%v(%v) }\n\n", name, pa))
+			p.out.WriteString(fmt.Sprintf("if err == nil { ret = p.Data.action%v(p.pos, %v) }\n\n", name, pa))
 		} else {
-			p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(%v) }\n\n", name, pa))
+			p.out.WriteString(fmt.Sprintf("if err == nil { p.Data.action%v(p.pos, %v) }\n\n", name, pa))
 		}
 	}
 	if e != "" {
@@ -385,7 +385,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if pa != "" {
 			args = ", " + pa
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(err %v) }\n\n", name, args))
+		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(p.pos, err %v) }\n\n", name, args))
 	}
 
 	if hasType {
@@ -397,9 +397,9 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 	fs := p.functionSignature(exp)
 	if a != "" {
 		if hasType {
-			p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(%v) %v { %v\n}\n\n", *fPrefix, name, fs, ftype, a))
+			p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(pos int, %v) %v { %v\n}\n\n", *fPrefix, name, fs, ftype, a))
 		} else {
-			p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(%v) { %v\n}\n\n", *fPrefix, name, fs, a))
+			p.out.WriteString(fmt.Sprintf("func (p *%vData) action%v(pos int, %v) { %v\n}\n\n", *fPrefix, name, fs, a))
 		}
 	}
 	if e != "" {
@@ -407,7 +407,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if fs != "" {
 			args = ", " + fs
 		}
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(err error %v) error {\n%v\n}\n\n", *fPrefix, name, args, e))
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(pos int, err error %v) error {\n%v\n}\n\n", *fPrefix, name, args, e))
 	}
 }
 
