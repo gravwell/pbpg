@@ -8,13 +8,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 type CalcData struct{}
 
 func main() {
-	tokens := strings.Fields(os.Args[1])
-	result, err := ParseCalc(tokens, nil)
+	result, err := ParseCalc(os.Args[1], nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,13 +53,13 @@ func (p *CalcParser) stateExpression() (int, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionExpression(v1, v2, v3)
+		ret = p.Data.actionExpression(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionExpression(v1 int, v2 []string, v3 []int) int {
+func (p *CalcData) actionExpression(pos int, v1 int, v2 []string, v3 []int) int {
 	r := v1
 	for i, v := range v2 {
 		switch v {
@@ -104,13 +105,13 @@ func (p *CalcParser) stateTerm() (int, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionTerm(v1, v2, v3)
+		ret = p.Data.actionTerm(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionTerm(v1 int, v2 []string, v3 []int) int {
+func (p *CalcData) actionTerm(pos int, v1 int, v2 []string, v3 []int) int {
 	r := v1
 	for i, v := range v2 {
 		switch v {
@@ -151,15 +152,18 @@ func (p *CalcParser) stateFactor() (int, error) {
 	if err != nil {
 		a1Pos = 2
 		v4, err = p.stateNumber()
+		if err != nil {
+			a1Pos = -1
+		}
 	}
 	if err == nil {
-		ret = p.Data.actionFactor(a1Pos, v1, v2, v3, v4)
+		ret = p.Data.actionFactor(p.pos, a1Pos, v1, v2, v3, v4)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionFactor(a1Pos int, v1 string, v2 int, v3 string, v4 int) int {
+func (p *CalcData) actionFactor(pos int, a1Pos int, v1 string, v2 int, v3 string, v4 int) int {
 	var r int
 	switch a1Pos {
 	case 1:
@@ -183,15 +187,18 @@ func (p *CalcParser) stateAddOp() (string, error) {
 	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("-")
+		if err != nil {
+			a1Pos = -1
+		}
 	}
 	if err == nil {
-		ret = p.Data.actionAddOp(a1Pos, v1, v2)
+		ret = p.Data.actionAddOp(p.pos, a1Pos, v1, v2)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionAddOp(a1Pos int, v1 string, v2 string) string {
+func (p *CalcData) actionAddOp(pos int, a1Pos int, v1 string, v2 string) string {
 	var r string
 	switch a1Pos {
 	case 1:
@@ -215,15 +222,18 @@ func (p *CalcParser) stateMultOp() (string, error) {
 	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("/")
+		if err != nil {
+			a1Pos = -1
+		}
 	}
 	if err == nil {
-		ret = p.Data.actionMultOp(a1Pos, v1, v2)
+		ret = p.Data.actionMultOp(p.pos, a1Pos, v1, v2)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionMultOp(a1Pos int, v1 string, v2 string) string {
+func (p *CalcData) actionMultOp(pos int, a1Pos int, v1 string, v2 string) string {
 	var r string
 	switch a1Pos {
 	case 1:
@@ -273,13 +283,13 @@ func (p *CalcParser) stateNumber() (int, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionNumber(v1, v2, v3)
+		ret = p.Data.actionNumber(p.pos, v1, v2, v3)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionNumber(v1 string, v2 string, v3 []string) int {
+func (p *CalcData) actionNumber(pos int, v1 string, v2 string, v3 []string) int {
 	stringNumber := v1 + v2 + strings.Join(v3, "")
 	num, _ := strconv.Atoi(stringNumber)
 	return num
@@ -293,13 +303,13 @@ func (p *CalcParser) stateNeg() (string, error) {
 	var v1 string
 	v1, err = p.literal("-")
 	if err == nil {
-		ret = p.Data.actionNeg(v1)
+		ret = p.Data.actionNeg(p.pos, v1)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionNeg(v1 string) string {
+func (p *CalcData) actionNeg(pos int, v1 string) string {
 	return v1
 }
 
@@ -347,6 +357,9 @@ func (p *CalcParser) stateDigit() (string, error) {
 									if err != nil {
 										a1Pos = 10
 										v10, err = p.literal("9")
+										if err != nil {
+											a1Pos = -1
+										}
 									}
 								}
 							}
@@ -357,22 +370,22 @@ func (p *CalcParser) stateDigit() (string, error) {
 		}
 	}
 	if err == nil {
-		ret = p.Data.actionDigit(a1Pos, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10)
+		ret = p.Data.actionDigit(p.pos, a1Pos, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10)
 	}
 
 	return ret, err
 }
 
-func (p *CalcData) actionDigit(a1Pos int, v1 string, v2 string, v3 string, v4 string, v5 string, v6 string, v7 string, v8 string, v9 string, v10 string) string {
+func (p *CalcData) actionDigit(pos int, a1Pos int, v1 string, v2 string, v3 string, v4 string, v5 string, v6 string, v7 string, v8 string, v9 string, v10 string) string {
 	return fmt.Sprintf("%v", a1Pos-1)
 }
 
-func ParseCalc(input []string, data *CalcData) (int, error) {
+func ParseCalc(input string, data *CalcData) (int, error) {
 	p := newCalcParser(input, data)
 
 	ret, err := p.stateExpression()
 	if err == nil {
-		if p.pos < len(p.input) {
+		if strings.TrimSpace(p.input[p.pos:]) != "" {
 			return ret, p.lastErr
 		}
 	}
@@ -381,31 +394,53 @@ func ParseCalc(input []string, data *CalcData) (int, error) {
 }
 
 type CalcParser struct {
-	input   []string
-	pos     int
-	Data    *CalcData
-	lastErr error
+	input       string
+	pos         int
+	lineOffsets []int
+	Data        *CalcData
+	lastErr     error
 
 	predictStack []*CalcParser
 }
 
-func newCalcParser(input []string, data *CalcData) *CalcParser {
+func newCalcParser(input string, data *CalcData) *CalcParser {
 	return &CalcParser{
-		input: input,
-		Data:  data,
+		input:       input,
+		lineOffsets: CalcGenerateLineOffsets(input),
+		Data:        data,
 	}
 }
 
-func (p *CalcParser) position() int {
-	return p.pos
+func CalcGenerateLineOffsets(input string) []int {
+	var ret []int
+
+	lines := strings.Split(input, "\n")
+
+	offset := 0
+	for _, v := range lines {
+		ret = append(ret, len(v)+1+offset)
+		offset += len(v) + 1
+	}
+	return ret
+}
+
+func (p *CalcParser) position() string {
+	for i, v := range p.lineOffsets {
+		if p.pos < v {
+			return fmt.Sprintf("line %v", i)
+		}
+	}
+	return fmt.Sprintln("impossible line reached", p.pos)
 }
 
 func (p *CalcParser) literal(want string) (string, error) {
-	if p.pos >= len(p.input) {
-		return "", fmt.Errorf("EOF")
+	count := 0
+	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
+		count += s
 	}
-	if p.input[p.pos] == want {
-		p.pos++
+
+	if strings.HasPrefix(p.input[p.pos+count:], want) {
+		p.pos += count + len(want)
 		return want, nil
 	}
 
@@ -417,6 +452,7 @@ func (p *CalcParser) predict() *CalcParser {
 	return &CalcParser{
 		input:        p.input,
 		pos:          p.pos,
+		lineOffsets:  p.lineOffsets,
 		predictStack: p.predictStack,
 		lastErr:      p.lastErr,
 		Data:         p.Data,

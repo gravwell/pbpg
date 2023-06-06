@@ -7,13 +7,14 @@
 		"fmt"
 		"strings"
 		"strconv"
+		"unicode/utf8"
+		"unicode"
 	)
 
 	type CalcData struct {}
 
 	func main() {
-		tokens := strings.Fields(os.Args[1])
-		result, err := ParseCalc(tokens, nil)
+		result, err := ParseCalc(os.Args[1], nil)
 		if err != nil {
 			log.Fatal(err)
 		}
