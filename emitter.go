@@ -484,6 +484,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		} else {
 			p.out.WriteString(fmt.Sprintf("_, err = p.literal(%v)\n", strconv.Quote(term.literal)))
 		}
+		p.out.WriteString("if err != nil { p.error(err, p.pos) }\n")
 		vCount++
 	case TERM_GOR:
 		vCount = p.visitGOR(vCount, aCount, term.gor, rep, hasAction)
@@ -498,6 +499,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 			p.out.WriteString(fmt.Sprintf("{ n, _, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; }; };", term.lex))
 		}
 		vCount++
+		p.out.WriteString("if err != nil { p.error(err, p.pos) }\n")
 	}
 	return vCount
 }
@@ -517,7 +519,7 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 		p.out.WriteString("// option\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil } else { p = p.accept() }\n"))
+		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil } else { p = p.accept() }\n"))
 	case GOR_REPETITION:
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
@@ -530,13 +532,51 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 				acceptAppends += fmt.Sprintf("v%v = append(v%v, v%vtemp)\n", i, i, i)
 			}
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil; break } else { %v p = p.accept() }\n", acceptAppends))
+		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil; break } else { %v p = p.accept() }\n", acceptAppends))
 		p.out.WriteString("}\n")
 	}
 	return vCount
 }
 
+var errorRecovery = `
+type parseError struct {
+	err error
+	pos int
+}
+
+func (p *_PREFIX_Parser) error(err error, pos int) {
+	p.errorStack = append(p.errorStack, &parseError{ err: err, pos: pos })
+}
+
+func (p *_PREFIX_Parser) coalesceErrors() error {
+	var bestDepth int
+	var e []error
+
+	for _, v := range p.errorStack {
+		if v.pos > bestDepth {
+			bestDepth = v.pos
+			e = []error{v.err}
+		} else if v.pos == bestDepth {
+			e = append(e, v.err)
+		}
+	}
+	
+	if len(e) == 0 {
+		return nil
+	} else if len(e) == 1 {
+		return e[0]
+	} else {
+		ret := "multiple errors:\n"
+		for _, v := range e {
+			ret += fmt.Sprintf("\t%v\n", v)
+		}
+		return errors.New(ret)
+	}
+}
+`
+
 var header = `
+
 func Parse_PREFIX_(input string, data *_PREFIX_Data) %v {
 	p := new_PREFIX_Parser(input, data)
 
@@ -545,6 +585,8 @@ func Parse_PREFIX_(input string, data *_PREFIX_Data) %v {
 		if strings.TrimSpace(p.input[p.pos:]) != "" {
 			%v
 		}
+	} else {
+		err = p.coalesceErrors()
 	}
 	
 	%v 
@@ -555,7 +597,7 @@ type _PREFIX_Parser struct {
 	pos         int
 	lineOffsets []int
 	Data        *_PREFIX_Data
-	lastErr error
+	errorStack  []*parseError
 
 	predictStack []*_PREFIX_Parser
 }
@@ -611,7 +653,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		pos: p.pos,
 		lineOffsets: p.lineOffsets,
 		predictStack: p.predictStack,
-		lastErr: p.lastErr,
+		errorStack: p.errorStack,
 		Data: p.Data,
 	}
 }
@@ -619,7 +661,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 	pp := p.predictStack[len(p.predictStack)-1]
 	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.lastErr = p.lastErr
+	pp.errorStack = p.errorStack
 	return pp
 }
 
@@ -639,6 +681,8 @@ func Parse_PREFIX_(input []string, data *_PREFIX_Data) %v {
 		if p.pos < len(p.input) {
 			%v
 		}
+	} else {
+		err = p.coalesceErrors()
 	}
 	
 	%v 
@@ -648,7 +692,7 @@ type _PREFIX_Parser struct {
 	input       []string
 	pos         int
 	Data        *_PREFIX_Data
-	lastErr error
+	errorStack []*parseError
 
 	predictStack []*_PREFIX_Parser
 }
@@ -682,7 +726,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		input: p.input,
 		pos: p.pos,
 		predictStack: p.predictStack,
-		lastErr: p.lastErr,
+		errorStack: p.errorStack,
 		Data: p.Data,
 	}
 }
@@ -690,7 +734,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 	pp := p.predictStack[len(p.predictStack)-1]
 	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.lastErr = p.lastErr
+	pp.errorStack = p.errorStack
 	return pp
 }
 

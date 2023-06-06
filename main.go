@@ -75,10 +75,12 @@ func main() {
 
 	// if the top level production has a type, then we have the parser return it
 	if ftype, ok := data.typeMap[data.entryPoint]; ok {
-		data.out.WriteString(fmt.Sprintf(h, "("+ftype+", error)", "ret, err", "return ret, p.lastErr", "return ret, err"))
+		data.out.WriteString(fmt.Sprintf(h, "("+ftype+", error)", "ret, err", "return ret, err", "return ret, err"))
 	} else {
-		data.out.WriteString(fmt.Sprintf(h, "error", "err", "return p.lastErr", "return err"))
+		data.out.WriteString(fmt.Sprintf(h, "error", "err", "return err", "return err"))
 	}
+
+	data.out.WriteString(strings.ReplaceAll(errorRecovery, PREFIX, *fPrefix))
 
 	formatted, err := format.Source([]byte(data.out.String()))
 	if err != nil {
