@@ -395,7 +395,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if pa != "" {
 			args = ", " + pa
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { rerr := p.Data.error%v(entryPos, p.errorStack.depth(), p.errorStack.coalesce() %v); if rerr != err { p.errorStack.clear(); p.errorStack.error(rerr, p.pos); } }\n\n", name, args))
+		p.out.WriteString(fmt.Sprintf("if err != nil { terr := p.errorStack.coalesce(); rerr := p.Data.error%v(entryPos, p.errorStack.depth(), terr %v); if rerr != terr { p.errorStack.clear(); p.errorStack.error(rerr, p.pos); } }\n\n", name, args))
 	}
 
 	if hasType {
@@ -489,7 +489,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		}
 		p.statesUsed[term.name] = true
 
-		p.out.WriteString(fmt.Sprintf("if p.errorStack.coalesce() != nil { v%vErrorStack.error(p.errorStack.coalesce(), p.errorStack.depth()) }; p.errorStack = v%vErrorStack\n", errorCount, errorCount))
+		p.out.WriteString(fmt.Sprintf("if p.errorStack.coalesce() != nil { v%vErrorStack.merge(p.errorStack) }; p.errorStack = v%vErrorStack\n", errorCount, errorCount))
 	case TERM_LITERAL:
 		if hasAction {
 			if rep {
@@ -567,6 +567,12 @@ type parseError struct {
 
 func (e *parserErrorStack) clear() {
 	e.stack = []*parseError{}
+}
+
+func (e *parserErrorStack) merge(e2 *parserErrorStack) {
+	for _, v := range e2.stack {
+		e.stack = append(e.stack, v)
+	}
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
