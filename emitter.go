@@ -1,4 +1,10 @@
 /*************************************************************************
+											Error {
+												if errPos > pos {
+													return err
+												}
+												return fmt.Errorf("expected expression")
+											}
  * Copyright 2022 Gravwell, Inc. All rights reserved.
  * Contact: <legal@gravwell.io>
  *
@@ -359,6 +365,10 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 	}
 	p.out.WriteString(fmt.Sprintf("func (p *%vParser) state%v() (%v error) {\nvar err error\n", *fPrefix, name, retType))
 
+	if e != "" {
+		p.out.WriteString("entryPos := p.pos\n")
+	}
+
 	if hasType {
 		p.out.WriteString(fmt.Sprintf("var ret %v\n", ftype))
 	}
@@ -385,7 +395,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if pa != "" {
 			args = ", " + pa
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { err = p.Data.error%v(p.pos, err %v) }\n\n", name, args))
+		p.out.WriteString(fmt.Sprintf("if err != nil { terr := p.errorStack.coalesce(); rerr := p.Data.error%v(entryPos, p.errorStack.depth(), terr %v); if rerr != terr { p.errorStack.clear(); p.errorStack.error(rerr, p.pos); } }\n\n", name, args))
 	}
 
 	if hasType {
@@ -407,7 +417,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		if fs != "" {
 			args = ", " + fs
 		}
-		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(pos int, err error %v) error {\n%v\n}\n\n", *fPrefix, name, args, e))
+		p.out.WriteString(fmt.Sprintf("func (p *%vData) error%v(pos int, errPos int, err error %v) error {\n%v\n}\n\n", *fPrefix, name, args, e))
 	}
 }
 
@@ -456,6 +466,10 @@ func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, re
 func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAction bool) int {
 	switch term.option {
 	case TERM_NAME:
+		// states get their own error stack
+		p.out.WriteString(fmt.Sprintf("v%vErrorStack := p.errorStack; p.errorStack = &parserErrorStack{} ;\n", vCount))
+		errorCount := vCount
+
 		if _, ok := p.typeMap[term.name]; ok {
 			if hasAction {
 				if rep {
@@ -474,6 +488,8 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 			p.statesUsed = make(map[string]bool)
 		}
 		p.statesUsed[term.name] = true
+
+		p.out.WriteString(fmt.Sprintf("if p.errorStack.coalesce() != nil { v%vErrorStack.merge(p.errorStack) }; p.errorStack = v%vErrorStack\n", errorCount, errorCount))
 	case TERM_LITERAL:
 		if hasAction {
 			if rep {
@@ -484,20 +500,22 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		} else {
 			p.out.WriteString(fmt.Sprintf("_, err = p.literal(%v)\n", strconv.Quote(term.literal)))
 		}
+		p.out.WriteString("if err != nil { p.errorStack.error(err, p.pos) }\n")
 		vCount++
 	case TERM_GOR:
 		vCount = p.visitGOR(vCount, aCount, term.gor, rep, hasAction)
 	case TERM_LEX:
 		if hasAction {
 			if rep {
-				p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; v%vtemp = lexeme }; };", term.lex, vCount))
+				p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = lerr } else { err = nil; v%vtemp = lexeme }; };", term.lex, vCount))
 			} else {
-				p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; v%v = lexeme }; };", term.lex, vCount))
+				p.out.WriteString(fmt.Sprintf("{ n, lexeme, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = lerr } else { err = nil; v%v = lexeme }; };", term.lex, vCount))
 			}
 		} else {
-			p.out.WriteString(fmt.Sprintf("{ n, _, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = fmt.Errorf(\"%%v: %%w\", p.position(), lerr) } else { err = nil; }; };", term.lex))
+			p.out.WriteString(fmt.Sprintf("{ n, _, lerr := p.Data.lex%v(p.input[p.pos:]); p.pos += n; if lerr != nil { err = lerr } else { err = nil; }; };", term.lex))
 		}
 		vCount++
+		p.out.WriteString("if err != nil { p.errorStack.error(err, p.pos) }\n")
 	}
 	return vCount
 }
@@ -517,7 +535,7 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 		p.out.WriteString("// option\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil } else { p = p.accept() }\n"))
+		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil } else { p = p.accept() }\n"))
 	case GOR_REPETITION:
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
@@ -530,21 +548,95 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 				acceptAppends += fmt.Sprintf("v%v = append(v%v, v%vtemp)\n", i, i, i)
 			}
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); p.lastErr = err; err = nil; break } else { %v p = p.accept() }\n", acceptAppends))
+		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil; break } else { %v p = p.accept() }\n", acceptAppends))
 		p.out.WriteString("}\n")
 	}
 	return vCount
 }
 
+var errorRecovery = `
+
+type parserErrorStack struct {
+	stack []*parseError
+}
+
+type parseError struct {
+	err error
+	pos int
+}
+
+func (e *parserErrorStack) clear() {
+	e.stack = []*parseError{}
+}
+
+func (e *parserErrorStack) merge(e2 *parserErrorStack) {
+	for _, v := range e2.stack {
+		e.stack = append(e.stack, v)
+	}
+}
+
+func (e *parserErrorStack) error(err error, pos int) {
+	e.stack = append(e.stack, &parseError{ err: err, pos: pos })
+}
+
+func (e *parserErrorStack) coalesce() error {
+	var bestDepth int
+	var es []error
+
+COALESCE_OUTER:
+	for _, v := range e.stack {
+		if v.pos > bestDepth {
+			bestDepth = v.pos
+			es = []error{v.err}
+		} else if v.pos == bestDepth {
+			// deduplicate errors at a given depth
+			for _, w := range es {
+				if w.Error() == v.err.Error() {
+					continue COALESCE_OUTER
+				}
+			}
+			es = append(es, v.err)
+		}
+	}
+	
+	if len(es) == 0 {
+		return nil
+	} else if len(es) == 1 {
+		return es[0]
+	} else {
+		// print the error stack in reverse order
+		var ret string
+		for i := len(es)-1; i >= 0; i-- {
+			ret += es[i].Error() + "\n"
+		}
+		return errors.New(strings.TrimSpace(ret))
+	}
+}
+
+func (e *parserErrorStack) depth() int {
+	var ret int
+	for _, v := range e.stack {
+		if v.pos > ret {
+			ret = v.pos
+		}
+	}
+	return ret
+}
+`
+
 var header = `
+
 func Parse_PREFIX_(input string, data *_PREFIX_Data) %v {
 	p := new_PREFIX_Parser(input, data)
 
 	%v := p.state_ENTRYPOINT_()
 	if err == nil {
 		if strings.TrimSpace(p.input[p.pos:]) != "" {
+			err = p.errorStack.coalesce()
 			%v
 		}
+	} else {
+		err = p.errorStack.coalesce()
 	}
 	
 	%v 
@@ -555,7 +647,7 @@ type _PREFIX_Parser struct {
 	pos         int
 	lineOffsets []int
 	Data        *_PREFIX_Data
-	lastErr error
+	errorStack  *parserErrorStack
 
 	predictStack []*_PREFIX_Parser
 }
@@ -601,7 +693,7 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", fmt.Errorf("%%v: expected \"%%v\"", p.position(), want)
+	return "", errExpected
 }
 
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
@@ -611,7 +703,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		pos: p.pos,
 		lineOffsets: p.lineOffsets,
 		predictStack: p.predictStack,
-		lastErr: p.lastErr,
+		errorStack: p.errorStack,
 		Data: p.Data,
 	}
 }
@@ -619,7 +711,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 	pp := p.predictStack[len(p.predictStack)-1]
 	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.lastErr = p.lastErr
+	pp.errorStack = p.errorStack
 	return pp
 }
 
@@ -637,8 +729,11 @@ func Parse_PREFIX_(input []string, data *_PREFIX_Data) %v {
 	%v := p.state_ENTRYPOINT_()
 	if err == nil {
 		if p.pos < len(p.input) {
+			err = p.errorStack.coalesce()
 			%v
 		}
+	} else {
+		err = p.errorStack.coalesce()
 	}
 	
 	%v 
@@ -648,7 +743,7 @@ type _PREFIX_Parser struct {
 	input       []string
 	pos         int
 	Data        *_PREFIX_Data
-	lastErr error
+	errorStack  *parserErrorStack
 
 	predictStack []*_PREFIX_Parser
 }
@@ -657,6 +752,7 @@ func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
 	return &_PREFIX_Parser{
 		input:       input,
 		Data: data,
+		errorStack: &parserErrorStack{},
 	}
 }
 
@@ -665,15 +761,17 @@ func (p *_PREFIX_Parser) position() int {
 }
 
 func (p *_PREFIX_Parser) literal(want string) (string, error) {
+	var errExpected = fmt.Errorf("expected %%v", want)
+
 	if p.pos >= len(p.input) {
-		return "", fmt.Errorf("EOF")
+		return "", errExpected
 	}
 	if p.input[p.pos] == want {
 		p.pos++
 		return want, nil
 	}
 
-	return "", fmt.Errorf("%%v: expected \"%%v\"", p.position(), want)
+	return "", errExpected
 }
 
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
@@ -682,7 +780,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 		input: p.input,
 		pos: p.pos,
 		predictStack: p.predictStack,
-		lastErr: p.lastErr,
+		errorStack: p.errorStack,
 		Data: p.Data,
 	}
 }
@@ -690,7 +788,7 @@ func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 	pp := p.predictStack[len(p.predictStack)-1]
 	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.lastErr = p.lastErr
+	pp.errorStack = p.errorStack
 	return pp
 }
 
