@@ -4,6 +4,7 @@
 	import (
 		"os"
 		"log"
+		"errors"
 		"fmt"
 		"strings"
 		"strconv"

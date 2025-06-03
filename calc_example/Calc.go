@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -31,18 +32,35 @@ func (p *CalcParser) stateExpression() (int, error) {
 	var v2 []string
 	var v3temp int
 	var v3 []int
+	v1ErrorStack := p.errorStack
+	p.errorStack = &parserErrorStack{}
 	v1, err = p.stateTerm()
+	if p.errorStack.coalesce() != nil {
+		v1ErrorStack.merge(p.errorStack)
+	}
+	p.errorStack = v1ErrorStack
 	if err == nil {
 		// repetition
 		for {
 			p = p.predict()
+			v2ErrorStack := p.errorStack
+			p.errorStack = &parserErrorStack{}
 			v2temp, err = p.stateAddOp()
+			if p.errorStack.coalesce() != nil {
+				v2ErrorStack.merge(p.errorStack)
+			}
+			p.errorStack = v2ErrorStack
 			if err == nil {
+				v3ErrorStack := p.errorStack
+				p.errorStack = &parserErrorStack{}
 				v3temp, err = p.stateTerm()
+				if p.errorStack.coalesce() != nil {
+					v3ErrorStack.merge(p.errorStack)
+				}
+				p.errorStack = v3ErrorStack
 			}
 			if err != nil {
 				p = p.backtrack()
-				p.lastErr = err
 				err = nil
 				break
 			} else {
@@ -83,18 +101,35 @@ func (p *CalcParser) stateTerm() (int, error) {
 	var v2 []string
 	var v3temp int
 	var v3 []int
+	v1ErrorStack := p.errorStack
+	p.errorStack = &parserErrorStack{}
 	v1, err = p.stateFactor()
+	if p.errorStack.coalesce() != nil {
+		v1ErrorStack.merge(p.errorStack)
+	}
+	p.errorStack = v1ErrorStack
 	if err == nil {
 		// repetition
 		for {
 			p = p.predict()
+			v2ErrorStack := p.errorStack
+			p.errorStack = &parserErrorStack{}
 			v2temp, err = p.stateMultOp()
+			if p.errorStack.coalesce() != nil {
+				v2ErrorStack.merge(p.errorStack)
+			}
+			p.errorStack = v2ErrorStack
 			if err == nil {
+				v3ErrorStack := p.errorStack
+				p.errorStack = &parserErrorStack{}
 				v3temp, err = p.stateFactor()
+				if p.errorStack.coalesce() != nil {
+					v3ErrorStack.merge(p.errorStack)
+				}
+				p.errorStack = v3ErrorStack
 			}
 			if err != nil {
 				p = p.backtrack()
-				p.lastErr = err
 				err = nil
 				break
 			} else {
@@ -138,10 +173,22 @@ func (p *CalcParser) stateFactor() (int, error) {
 	// group
 	p = p.predict()
 	v1, err = p.literal("(")
+	if err != nil {
+		p.errorStack.error(err, p.pos)
+	}
 	if err == nil {
+		v2ErrorStack := p.errorStack
+		p.errorStack = &parserErrorStack{}
 		v2, err = p.stateExpression()
+		if p.errorStack.coalesce() != nil {
+			v2ErrorStack.merge(p.errorStack)
+		}
+		p.errorStack = v2ErrorStack
 		if err == nil {
 			v3, err = p.literal(")")
+			if err != nil {
+				p.errorStack.error(err, p.pos)
+			}
 		}
 	}
 	if err != nil {
@@ -151,7 +198,13 @@ func (p *CalcParser) stateFactor() (int, error) {
 	}
 	if err != nil {
 		a1Pos = 2
+		v4ErrorStack := p.errorStack
+		p.errorStack = &parserErrorStack{}
 		v4, err = p.stateNumber()
+		if p.errorStack.coalesce() != nil {
+			v4ErrorStack.merge(p.errorStack)
+		}
+		p.errorStack = v4ErrorStack
 		if err != nil {
 			a1Pos = -1
 		}
@@ -185,8 +238,14 @@ func (p *CalcParser) stateAddOp() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("+")
 	if err != nil {
+		p.errorStack.error(err, p.pos)
+	}
+	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("-")
+		if err != nil {
+			p.errorStack.error(err, p.pos)
+		}
 		if err != nil {
 			a1Pos = -1
 		}
@@ -220,8 +279,14 @@ func (p *CalcParser) stateMultOp() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("*")
 	if err != nil {
+		p.errorStack.error(err, p.pos)
+	}
+	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("/")
+		if err != nil {
+			p.errorStack.error(err, p.pos)
+		}
 		if err != nil {
 			a1Pos = -1
 		}
@@ -255,24 +320,40 @@ func (p *CalcParser) stateNumber() (int, error) {
 	var v3 []string
 	// option
 	p = p.predict()
+	v1ErrorStack := p.errorStack
+	p.errorStack = &parserErrorStack{}
 	v1, err = p.stateNeg()
+	if p.errorStack.coalesce() != nil {
+		v1ErrorStack.merge(p.errorStack)
+	}
+	p.errorStack = v1ErrorStack
 	if err != nil {
 		p = p.backtrack()
-		p.lastErr = err
 		err = nil
 	} else {
 		p = p.accept()
 	}
 	if err == nil {
+		v2ErrorStack := p.errorStack
+		p.errorStack = &parserErrorStack{}
 		v2, err = p.stateDigit()
+		if p.errorStack.coalesce() != nil {
+			v2ErrorStack.merge(p.errorStack)
+		}
+		p.errorStack = v2ErrorStack
 		if err == nil {
 			// repetition
 			for {
 				p = p.predict()
+				v3ErrorStack := p.errorStack
+				p.errorStack = &parserErrorStack{}
 				v3temp, err = p.stateDigit()
+				if p.errorStack.coalesce() != nil {
+					v3ErrorStack.merge(p.errorStack)
+				}
+				p.errorStack = v3ErrorStack
 				if err != nil {
 					p = p.backtrack()
-					p.lastErr = err
 					err = nil
 					break
 				} else {
@@ -302,6 +383,9 @@ func (p *CalcParser) stateNeg() (string, error) {
 	var ret string
 	var v1 string
 	v1, err = p.literal("-")
+	if err != nil {
+		p.errorStack.error(err, p.pos)
+	}
 	if err == nil {
 		ret = p.Data.actionNeg(p.pos, v1)
 	}
@@ -331,32 +415,62 @@ func (p *CalcParser) stateDigit() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("0")
 	if err != nil {
+		p.errorStack.error(err, p.pos)
+	}
+	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("1")
+		if err != nil {
+			p.errorStack.error(err, p.pos)
+		}
 		if err != nil {
 			a1Pos = 3
 			v3, err = p.literal("2")
 			if err != nil {
+				p.errorStack.error(err, p.pos)
+			}
+			if err != nil {
 				a1Pos = 4
 				v4, err = p.literal("3")
+				if err != nil {
+					p.errorStack.error(err, p.pos)
+				}
 				if err != nil {
 					a1Pos = 5
 					v5, err = p.literal("4")
 					if err != nil {
+						p.errorStack.error(err, p.pos)
+					}
+					if err != nil {
 						a1Pos = 6
 						v6, err = p.literal("5")
+						if err != nil {
+							p.errorStack.error(err, p.pos)
+						}
 						if err != nil {
 							a1Pos = 7
 							v7, err = p.literal("6")
 							if err != nil {
+								p.errorStack.error(err, p.pos)
+							}
+							if err != nil {
 								a1Pos = 8
 								v8, err = p.literal("7")
+								if err != nil {
+									p.errorStack.error(err, p.pos)
+								}
 								if err != nil {
 									a1Pos = 9
 									v9, err = p.literal("8")
 									if err != nil {
+										p.errorStack.error(err, p.pos)
+									}
+									if err != nil {
 										a1Pos = 10
 										v10, err = p.literal("9")
+										if err != nil {
+											p.errorStack.error(err, p.pos)
+										}
 										if err != nil {
 											a1Pos = -1
 										}
@@ -386,8 +500,11 @@ func ParseCalc(input string, data *CalcData) (int, error) {
 	ret, err := p.stateExpression()
 	if err == nil {
 		if strings.TrimSpace(p.input[p.pos:]) != "" {
-			return ret, p.lastErr
+			err = p.errorStack.coalesce()
+			return ret, err
 		}
+	} else {
+		err = p.errorStack.coalesce()
 	}
 
 	return ret, err
@@ -398,7 +515,7 @@ type CalcParser struct {
 	pos         int
 	lineOffsets []int
 	Data        *CalcData
-	lastErr     error
+	errorStack  *parserErrorStack
 
 	predictStack []*CalcParser
 }
@@ -408,6 +525,7 @@ func newCalcParser(input string, data *CalcData) *CalcParser {
 		input:       input,
 		lineOffsets: CalcGenerateLineOffsets(input),
 		Data:        data,
+		errorStack:  &parserErrorStack{},
 	}
 }
 
@@ -424,16 +542,9 @@ func CalcGenerateLineOffsets(input string) []int {
 	return ret
 }
 
-func (p *CalcParser) position() string {
-	for i, v := range p.lineOffsets {
-		if p.pos < v {
-			return fmt.Sprintf("line %v", i)
-		}
-	}
-	return fmt.Sprintln("impossible line reached", p.pos)
-}
-
 func (p *CalcParser) literal(want string) (string, error) {
+	var errExpected = fmt.Errorf("expected %v", want)
+
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -444,7 +555,7 @@ func (p *CalcParser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", fmt.Errorf("%v: expected \"%v\"", p.position(), want)
+	return "", errExpected
 }
 
 func (p *CalcParser) predict() *CalcParser {
@@ -454,7 +565,7 @@ func (p *CalcParser) predict() *CalcParser {
 		pos:          p.pos,
 		lineOffsets:  p.lineOffsets,
 		predictStack: p.predictStack,
-		lastErr:      p.lastErr,
+		errorStack:   p.errorStack,
 		Data:         p.Data,
 	}
 }
@@ -462,7 +573,7 @@ func (p *CalcParser) predict() *CalcParser {
 func (p *CalcParser) backtrack() *CalcParser {
 	pp := p.predictStack[len(p.predictStack)-1]
 	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.lastErr = p.lastErr
+	pp.errorStack = p.errorStack
 	return pp
 }
 
@@ -470,4 +581,69 @@ func (p *CalcParser) accept() *CalcParser {
 	pp := p.backtrack()
 	pp.pos = p.pos
 	return pp
+}
+
+type parserErrorStack struct {
+	stack []*parseError
+}
+
+type parseError struct {
+	err error
+	pos int
+}
+
+func (e *parserErrorStack) clear() {
+	e.stack = []*parseError{}
+}
+
+func (e *parserErrorStack) merge(e2 *parserErrorStack) {
+	e.stack = append(e.stack, e2.stack...)
+}
+
+func (e *parserErrorStack) error(err error, pos int) {
+	e.stack = append(e.stack, &parseError{err: err, pos: pos})
+}
+
+func (e *parserErrorStack) coalesce() error {
+	var bestDepth int
+	var es []error
+
+COALESCE_OUTER:
+	for _, v := range e.stack {
+		if v.pos > bestDepth {
+			bestDepth = v.pos
+			es = []error{v.err}
+		} else if v.pos == bestDepth {
+			// deduplicate errors at a given depth
+			for _, w := range es {
+				if w.Error() == v.err.Error() {
+					continue COALESCE_OUTER
+				}
+			}
+			es = append(es, v.err)
+		}
+	}
+
+	if len(es) == 0 {
+		return nil
+	} else if len(es) == 1 {
+		return es[0]
+	} else {
+		// print the error stack in reverse order
+		var ret string
+		for i := len(es) - 1; i >= 0; i-- {
+			ret += es[i].Error() + "\n"
+		}
+		return errors.New(strings.TrimSpace(ret))
+	}
+}
+
+func (e *parserErrorStack) depth() int {
+	var ret int
+	for _, v := range e.stack {
+		if v.pos > ret {
+			ret = v.pos
+		}
+	}
+	return ret
 }

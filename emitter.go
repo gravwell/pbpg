@@ -1,16 +1,10 @@
 /*************************************************************************
-											Error {
-												if errPos > pos {
-													return err
-												}
-												return fmt.Errorf("expected expression")
-											}
- * Copyright 2022 Gravwell, Inc. All rights reserved.
- * Contact: <legal@gravwell.io>
- *
- * This software may be modified and distributed under the terms of the
- * BSD 2-clause license. See the LICENSE file for details.
- **************************************************************************/
+* Copyright 2022 Gravwell, Inc. All rights reserved.
+* Contact: <legal@gravwell.io>
+*
+* This software may be modified and distributed under the terms of the
+* BSD 2-clause license. See the LICENSE file for details.
+**************************************************************************/
 package main
 
 import (
@@ -48,11 +42,11 @@ type Variable struct {
 }
 
 // verify does the following:
-// 	1. Ensures all productions used are defined.
-// 	2. All productions defined are used when starting from the entrypoint.
+//  1. Ensures all productions used are defined.
+//  2. All productions defined are used when starting from the entrypoint.
 func (p *pbpgData) verify() error {
 	// 1
-	for k, _ := range p.statesUsed {
+	for k := range p.statesUsed {
 		if p.stateMap[k] == nil {
 			return fmt.Errorf("state %v not defined", k)
 		}
@@ -82,7 +76,7 @@ func (p *pbpgData) verify() error {
 	}
 
 USED_LOOP:
-	for k, _ := range p.stateMap {
+	for k := range p.stateMap {
 		for _, v := range used {
 			if k == v {
 				continue USED_LOOP
@@ -107,7 +101,7 @@ func lexFunctions(e *Expression) map[string]bool {
 				m[t.lex] = true
 			case TERM_GOR:
 				x := lexFunctions(t.gor.expression)
-				for k, _ := range x {
+				for k := range x {
 					m[k] = true
 				}
 			}
@@ -434,13 +428,13 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 		}
 		vCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
 		if i < len(exp.alternatives)-1 {
-			p.out.WriteString(fmt.Sprintf("if err != nil { \n"))
+			p.out.WriteString("if err != nil { \n")
 		} else if needPos {
-			p.out.WriteString(fmt.Sprintf("if err != nil { \n"))
+			p.out.WriteString("if err != nil { \n")
 			p.out.WriteString(fmt.Sprintf("a%vPos = -1\n", aCount))
 		}
 	}
-	for i, _ := range exp.alternatives {
+	for i := range exp.alternatives {
 		if i < len(exp.alternatives)-1 || needPos {
 			p.out.WriteString("}\n")
 		}
@@ -455,7 +449,7 @@ func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, re
 			p.out.WriteString("if err == nil {\n")
 		}
 	}
-	for i, _ := range alt.terms {
+	for i := range alt.terms {
 		if i < len(alt.terms)-1 {
 			p.out.WriteString("}\n")
 		}
@@ -530,12 +524,12 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 		p.out.WriteString("// group\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack() } else { p = p.accept() }\n"))
+		p.out.WriteString("if err != nil { p = p.backtrack() } else { p = p.accept() }\n")
 	case GOR_OPTION:
 		p.out.WriteString("// option\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil } else { p = p.accept() }\n"))
+		p.out.WriteString("if err != nil { p = p.backtrack(); err = nil } else { p = p.accept() }\n")
 	case GOR_REPETITION:
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
@@ -570,9 +564,7 @@ func (e *parserErrorStack) clear() {
 }
 
 func (e *parserErrorStack) merge(e2 *parserErrorStack) {
-	for _, v := range e2.stack {
-		e.stack = append(e.stack, v)
-	}
+	e.stack = append(e.stack, e2.stack...)
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
@@ -657,6 +649,7 @@ func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
 		input:       input,
 		lineOffsets: _PREFIX_GenerateLineOffsets(input),
 		Data: data,
+		errorStack: &parserErrorStack{},
 	}
 }
 
@@ -673,16 +666,9 @@ func _PREFIX_GenerateLineOffsets(input string) []int {
 	return ret
 }
 
-func (p *_PREFIX_Parser) position() string {
-	for i, v := range p.lineOffsets {
-		if p.pos < v {
-			return fmt.Sprintf("line %%v", i)
-		}
-	}
-	return fmt.Sprintln("impossible line reached", p.pos)
-}
-
 func (p *_PREFIX_Parser) literal(want string) (string, error) {
+	var errExpected = fmt.Errorf("expected %%v", want)
+
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -754,10 +740,6 @@ func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
 		Data: data,
 		errorStack: &parserErrorStack{},
 	}
-}
-
-func (p *_PREFIX_Parser) position() int {
-	return p.pos
 }
 
 func (p *_PREFIX_Parser) literal(want string) (string, error) {
