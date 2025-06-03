@@ -94,14 +94,14 @@ func main() {
 		funcs := make(map[string]bool)
 		for _, v := range data.stateMap {
 			m := lexFunctions(v)
-			for k, _ := range m {
+			for k := range m {
 				funcs[k] = true
 			}
 		}
 
 		var o strings.Builder
 
-		for k, _ := range funcs {
+		for k := range funcs {
 			if *fToken {
 				o.WriteString(fmt.Sprintf("func (p *%vData) lex%v(input []string) (int, string, error) { return 0, \"\", nil }\n\n", *fPrefix, k))
 			} else {
