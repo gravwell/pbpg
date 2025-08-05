@@ -1,10 +1,18 @@
 # Introduction
 
-Practical BNF Parser Generator (pbpg) is a parser generator that aims to keep many of the best parts of other parser generators and syntaxes such as yacc, EBNF, and PEG, while both relaxing certain strict requirements and promoting concepts such as errors to part of the specification.
+pbpg is a Go parser generator. It was created because, at the time, there were no practical BNF-life parser generators for Go. The gold standard parser generator, [goyacc](https://pkg.go.dev/golang.org/x/tools/cmd/goyacc), is great, but it doesn't support anything but LL(1) grammars (and also doesn't generate very idiomatic Go). 
+
+pbpg attempts to provide a better approach to attaching the parser to a stateful lexer, as well as including error handling as a first class concept.
+
+Additionally, pbpg provides two input mechanisms -- single string "character streams", and pre-tokenized slices of strings.
 
 # Syntax and Constraints
 
-pbpg input is specified in an EBNF-like syntax. pbpg is also itself specified using pbpg. The syntax (pbnf) for pbpg is as follows:
+pbpg input is specified in [Wirth](https://en.wikipedia.org/wiki/Wirth_syntax_notation). Additionally, a `lex()` function and a `yacc`-like code header is included. Action/Error clauses are also used to interact with data at each rule. 
+
+pbpg is itself specified using pbpg.
+
+The syntax (pbnf) for pbpg is as follows:
 
 ```
 # This is a comment
