@@ -81,6 +81,7 @@ func main() {
 	}
 
 	data.out.WriteString(strings.ReplaceAll(errorRecovery, PREFIX, *fPrefix))
+	data.out.WriteString(data.literalErrorMap())
 
 	formatted, err := format.Source([]byte(data.out.String()))
 	if err != nil {

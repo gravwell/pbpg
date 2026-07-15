@@ -9,6 +9,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -31,6 +32,8 @@ type pbpgData struct {
 	out           strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
 
 	statesUsed map[string]bool // list of states referenced in terms. Used for grammar validation.
+
+	literalsUsed map[string]bool // list of literals referenced in terms. Used to emit the interned literal error map.
 
 	entryPoint string // The name of the first encountered production.
 }
@@ -460,9 +463,10 @@ func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, re
 func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAction bool) int {
 	switch term.option {
 	case TERM_NAME:
-		// states get their own error stack
-		p.out.WriteString(fmt.Sprintf("v%vErrorStack := p.errorStack; p.errorStack = &parserErrorStack{} ;\n", vCount))
-		errorCount := vCount
+		// states get their own error scope; recorded errors are kept when
+		// the scope pops (the old merge behavior) while clear/coalesce/depth
+		// operate on the innermost open scope only
+		p.out.WriteString("p.errorStack.push()\n")
 
 		if _, ok := p.typeMap[term.name]; ok {
 			if hasAction {
@@ -483,8 +487,12 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		}
 		p.statesUsed[term.name] = true
 
-		p.out.WriteString(fmt.Sprintf("if p.errorStack.coalesce() != nil { v%vErrorStack.merge(p.errorStack) }; p.errorStack = v%vErrorStack\n", errorCount, errorCount))
+		p.out.WriteString("p.errorStack.pop()\n")
 	case TERM_LITERAL:
+		if p.literalsUsed == nil {
+			p.literalsUsed = make(map[string]bool)
+		}
+		p.literalsUsed[term.literal] = true
 		if hasAction {
 			if rep {
 				p.out.WriteString(fmt.Sprintf("v%vtemp, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
@@ -550,8 +558,17 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 
 var errorRecovery = `
 
+// parserErrorStack accumulates parse errors in a single reusable backing
+// array.  Speculative parse attempts open a scope (push) around each state
+// call and close it afterwards (pop); recorded errors are kept when a scope
+// pops, while clear, coalesce, and depth operate on the innermost open scope
+// only.  This avoids allocating a fresh error stack for every speculative
+// attempt, which both burns CPU and creates a new runtime memory-profile
+// bucket for every unique recursion stack in long-running processes.
 type parserErrorStack struct {
-	stack []*parseError
+	stack  []parseError
+	scopes []int
+	es     []error // scratch buffer reused by coalesce
 }
 
 type parseError struct {
@@ -559,27 +576,40 @@ type parseError struct {
 	pos int
 }
 
-func (e *parserErrorStack) clear() {
-	e.stack = []*parseError{}
+// push opens an error scope around a speculative parse attempt.
+func (e *parserErrorStack) push() {
+	e.scopes = append(e.scopes, len(e.stack))
 }
 
-func (e *parserErrorStack) merge(e2 *parserErrorStack) {
-	e.stack = append(e.stack, e2.stack...)
+// pop closes the innermost scope; recorded errors remain.
+func (e *parserErrorStack) pop() {
+	e.scopes = e.scopes[:len(e.scopes)-1]
+}
+
+func (e *parserErrorStack) scopeBase() int {
+	if n := len(e.scopes); n > 0 {
+		return e.scopes[n-1]
+	}
+	return 0
+}
+
+func (e *parserErrorStack) clear() {
+	e.stack = e.stack[:e.scopeBase()]
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
-	e.stack = append(e.stack, &parseError{ err: err, pos: pos })
+	e.stack = append(e.stack, parseError{ err: err, pos: pos })
 }
 
 func (e *parserErrorStack) coalesce() error {
 	var bestDepth int
-	var es []error
+	es := e.es[:0]
 
 COALESCE_OUTER:
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > bestDepth {
 			bestDepth = v.pos
-			es = []error{v.err}
+			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
 			// deduplicate errors at a given depth
 			for _, w := range es {
@@ -590,24 +620,42 @@ COALESCE_OUTER:
 			es = append(es, v.err)
 		}
 	}
-	
+	e.es = es[:0]
+
 	if len(es) == 0 {
 		return nil
 	} else if len(es) == 1 {
 		return es[0]
-	} else {
-		// print the error stack in reverse order
-		var ret string
-		for i := len(es)-1; i >= 0; i-- {
-			ret += es[i].Error() + "\n"
-		}
-		return errors.New(strings.TrimSpace(ret))
 	}
+	// defer building the joined message until something reads it; failure
+	// handlers coalesce on every failed speculative attempt and almost
+	// always discard the result, so rendering eagerly wastes both CPU and
+	// allocations on strings that keep growing as failures cascade
+	return &joinedError{es: append([]error(nil), es...)}
+}
+
+// joinedError is a multi-error whose message is rendered lazily and
+// memoized.  It prints the error stack in reverse order.
+type joinedError struct {
+	es  []error
+	msg string
+}
+
+func (j *joinedError) Error() string {
+	if j.msg == "" {
+		var sb strings.Builder
+		for i := len(j.es)-1; i >= 0; i-- {
+			sb.WriteString(j.es[i].Error())
+			sb.WriteByte('\n')
+		}
+		j.msg = strings.TrimSpace(sb.String())
+	}
+	return j.msg
 }
 
 func (e *parserErrorStack) depth() int {
 	var ret int
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
 			ret = v.pos
 		}
@@ -615,6 +663,26 @@ func (e *parserErrorStack) depth() int {
 	return ret
 }
 `
+
+// literalErrorMap emits a package-level, read-only map of interned "expected
+// <literal>" errors covering every literal in the grammar.  literal() is on
+// the parse hot path and runs for every token match attempt, so it must not
+// allocate a fresh error per call.
+func (p *pbpgData) literalErrorMap() string {
+	lits := make([]string, 0, len(p.literalsUsed))
+	for k := range p.literalsUsed {
+		lits = append(lits, k)
+	}
+	sort.Strings(lits)
+
+	var sb strings.Builder
+	sb.WriteString("\nvar parserLiteralErrs = map[string]error{\n")
+	for _, l := range lits {
+		sb.WriteString(fmt.Sprintf("%v: errors.New(%v),\n", strconv.Quote(l), strconv.Quote("expected "+l)))
+	}
+	sb.WriteString("}\n")
+	return sb.String()
+}
 
 var header = `
 
@@ -641,7 +709,7 @@ type _PREFIX_Parser struct {
 	Data        *_PREFIX_Data
 	errorStack  *parserErrorStack
 
-	predictStack []*_PREFIX_Parser
+	posStack []int
 }
 
 func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
@@ -649,7 +717,11 @@ func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
 		input:       input,
 		lineOffsets: _PREFIX_GenerateLineOffsets(input),
 		Data: data,
-		errorStack: &parserErrorStack{},
+		errorStack: &parserErrorStack{
+			stack:  make([]parseError, 0, 64),
+			scopes: make([]int, 0, 64),
+		},
+		posStack: make([]int, 0, 64),
 	}
 }
 
@@ -666,9 +738,10 @@ func _PREFIX_GenerateLineOffsets(input string) []int {
 	return ret
 }
 
+// literal runs on every token match attempt during speculative parsing, so
+// it must not allocate; expected-token errors are interned in the generated
+// parserLiteralErrs map.
 func (p *_PREFIX_Parser) literal(want string) (string, error) {
-	var errExpected = fmt.Errorf("expected %%v", want)
-
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -679,32 +752,31 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", errExpected
+	if err, ok := parserLiteralErrs[want]; ok {
+		return "", err
+	}
+	return "", fmt.Errorf("expected %%v", want)
 }
 
+// predict/backtrack/accept save and restore the parser position around a
+// speculative parse attempt.  Only pos is mutable speculative state (input,
+// lineOffsets, Data, and errorStack are shared), so a position stack on the
+// receiver replaces the previous scheme of allocating a full parser copy per
+// attempt.
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
-	p.predictStack = append(p.predictStack, p)
-	return &_PREFIX_Parser{
-		input: p.input,
-		pos: p.pos,
-		lineOffsets: p.lineOffsets,
-		predictStack: p.predictStack,
-		errorStack: p.errorStack,
-		Data: p.Data,
-	}
+	p.posStack = append(p.posStack, p.pos)
+	return p
 }
 
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
-	pp := p.predictStack[len(p.predictStack)-1]
-	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.errorStack = p.errorStack
-	return pp
+	p.pos = p.posStack[len(p.posStack)-1]
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
 func (p *_PREFIX_Parser) accept() *_PREFIX_Parser {
-	pp := p.backtrack()
-	pp.pos = p.pos
-	return pp
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 `
 
@@ -731,53 +803,54 @@ type _PREFIX_Parser struct {
 	Data        *_PREFIX_Data
 	errorStack  *parserErrorStack
 
-	predictStack []*_PREFIX_Parser
+	posStack []int
 }
 
 func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
 	return &_PREFIX_Parser{
 		input:       input,
 		Data: data,
-		errorStack: &parserErrorStack{},
+		errorStack: &parserErrorStack{
+			stack:  make([]parseError, 0, 64),
+			scopes: make([]int, 0, 64),
+		},
+		posStack: make([]int, 0, 64),
 	}
 }
 
+// literal runs on every token match attempt during speculative parsing, so
+// it must not allocate; expected-token errors are interned in the generated
+// parserLiteralErrs map.
 func (p *_PREFIX_Parser) literal(want string) (string, error) {
-	var errExpected = fmt.Errorf("expected %%v", want)
-
-	if p.pos >= len(p.input) {
-		return "", errExpected
-	}
-	if p.input[p.pos] == want {
+	if p.pos < len(p.input) && p.input[p.pos] == want {
 		p.pos++
 		return want, nil
 	}
 
-	return "", errExpected
+	if err, ok := parserLiteralErrs[want]; ok {
+		return "", err
+	}
+	return "", fmt.Errorf("expected %%v", want)
 }
 
+// predict/backtrack/accept save and restore the parser position around a
+// speculative parse attempt.  Only pos is mutable speculative state (input,
+// Data, and errorStack are shared), so a position stack on the receiver
+// replaces the previous scheme of allocating a full parser copy per attempt.
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
-	p.predictStack = append(p.predictStack, p)
-	return &_PREFIX_Parser{
-		input: p.input,
-		pos: p.pos,
-		predictStack: p.predictStack,
-		errorStack: p.errorStack,
-		Data: p.Data,
-	}
+	p.posStack = append(p.posStack, p.pos)
+	return p
 }
 
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
-	pp := p.predictStack[len(p.predictStack)-1]
-	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.errorStack = p.errorStack
-	return pp
+	p.pos = p.posStack[len(p.posStack)-1]
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
 func (p *_PREFIX_Parser) accept() *_PREFIX_Parser {
-	pp := p.backtrack()
-	pp.pos = p.pos
-	return pp
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 `
 

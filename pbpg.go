@@ -19,13 +19,9 @@ func (p *pbpgParser) stateProgram() error {
 	// repetition
 	for {
 		p = p.predict()
-		v1ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		err = p.stateComment()
-		if p.errorStack.coalesce() != nil {
-			v1ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v1ErrorStack
+		p.errorStack.pop()
 		if err != nil {
 			p = p.backtrack()
 			err = nil
@@ -37,13 +33,9 @@ func (p *pbpgParser) stateProgram() error {
 	if err == nil {
 		// option
 		p = p.predict()
-		v1ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		err = p.stateHeader()
-		if p.errorStack.coalesce() != nil {
-			v1ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v1ErrorStack
+		p.errorStack.pop()
 		if err != nil {
 			p = p.backtrack()
 			err = nil
@@ -54,13 +46,9 @@ func (p *pbpgParser) stateProgram() error {
 			// repetition
 			for {
 				p = p.predict()
-				v1ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				err = p.stateTypes()
-				if p.errorStack.coalesce() != nil {
-					v1ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v1ErrorStack
+				p.errorStack.pop()
 				if err != nil {
 					p = p.backtrack()
 					err = nil
@@ -70,24 +58,16 @@ func (p *pbpgParser) stateProgram() error {
 				}
 			}
 			if err == nil {
-				v1ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				err = p.stateLine()
-				if p.errorStack.coalesce() != nil {
-					v1ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v1ErrorStack
+				p.errorStack.pop()
 				if err == nil {
 					// repetition
 					for {
 						p = p.predict()
-						v1ErrorStack := p.errorStack
-						p.errorStack = &parserErrorStack{}
+						p.errorStack.push()
 						err = p.stateLine()
-						if p.errorStack.coalesce() != nil {
-							v1ErrorStack.merge(p.errorStack)
-						}
-						p.errorStack = v1ErrorStack
+						p.errorStack.pop()
 						if err != nil {
 							p = p.backtrack()
 							err = nil
@@ -107,13 +87,9 @@ func (p *pbpgParser) stateProgram() error {
 func (p *pbpgParser) stateHeader() error {
 	var err error
 	var v1 string
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateCodeBlock()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		p.Data.actionHeader(p.pos, v1)
 	}
@@ -137,13 +113,9 @@ func (p *pbpgParser) stateTypes() error {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateName()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			{
 				n, lexeme, lerr := p.Data.lextype(p.input[p.pos:])
@@ -178,21 +150,13 @@ func (p *pbpgData) actionTypes(pos int, v1 string, v2 string, v3 string) {
 // Line = Comment | Production
 func (p *pbpgParser) stateLine() error {
 	var err error
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	err = p.stateComment()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err != nil {
-		v1ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		err = p.stateProduction()
-		if p.errorStack.coalesce() != nil {
-			v1ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v1ErrorStack
+		p.errorStack.pop()
 	}
 	return err
 }
@@ -206,13 +170,9 @@ func (p *pbpgParser) stateProduction() error {
 	var v4 string
 	var v5 string
 	var v6 string
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateName()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		v2, err = p.literal("=")
 		if err != nil {
@@ -221,13 +181,9 @@ func (p *pbpgParser) stateProduction() error {
 		if err == nil {
 			// option
 			p = p.predict()
-			v3ErrorStack := p.errorStack
-			p.errorStack = &parserErrorStack{}
+			p.errorStack.push()
 			v3, err = p.stateExpression()
-			if p.errorStack.coalesce() != nil {
-				v3ErrorStack.merge(p.errorStack)
-			}
-			p.errorStack = v3ErrorStack
+			p.errorStack.pop()
 			if err != nil {
 				p = p.backtrack()
 				err = nil
@@ -242,13 +198,9 @@ func (p *pbpgParser) stateProduction() error {
 				if err == nil {
 					// option
 					p = p.predict()
-					v5ErrorStack := p.errorStack
-					p.errorStack = &parserErrorStack{}
+					p.errorStack.push()
 					v5, err = p.stateAction()
-					if p.errorStack.coalesce() != nil {
-						v5ErrorStack.merge(p.errorStack)
-					}
-					p.errorStack = v5ErrorStack
+					p.errorStack.pop()
 					if err != nil {
 						p = p.backtrack()
 						err = nil
@@ -258,13 +210,9 @@ func (p *pbpgParser) stateProduction() error {
 					if err == nil {
 						// option
 						p = p.predict()
-						v6ErrorStack := p.errorStack
-						p.errorStack = &parserErrorStack{}
+						p.errorStack.push()
 						v6, err = p.stateError()
-						if p.errorStack.coalesce() != nil {
-							v6ErrorStack.merge(p.errorStack)
-						}
-						p.errorStack = v6ErrorStack
+						p.errorStack.pop()
 						if err != nil {
 							p = p.backtrack()
 							err = nil
@@ -309,13 +257,9 @@ func (p *pbpgParser) stateAction() (string, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateCodeBlock()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 	}
 	if err == nil {
 		ret = p.Data.actionAction(p.pos, v1, v2)
@@ -339,13 +283,9 @@ func (p *pbpgParser) stateError() (string, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateCodeBlock()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 	}
 	if err == nil {
 		ret = p.Data.actionError(p.pos, v1, v2)
@@ -370,13 +310,9 @@ func (p *pbpgParser) stateCodeBlock() (string, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateCode()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("}")
 			if err != nil {
@@ -404,13 +340,9 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 	var v2 []string
 	var v3temp *Alternative
 	var v3 []*Alternative
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateAlternative()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		// repetition
 		for {
@@ -420,13 +352,9 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 				p.errorStack.error(err, p.pos)
 			}
 			if err == nil {
-				v3ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				v3temp, err = p.stateAlternative()
-				if p.errorStack.coalesce() != nil {
-					v3ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v3ErrorStack
+				p.errorStack.pop()
 			}
 			if err != nil {
 				p = p.backtrack()
@@ -457,24 +385,16 @@ func (p *pbpgParser) stateAlternative() (*Alternative, error) {
 	var v1 *Term
 	var v2temp *Term
 	var v2 []*Term
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateTerm()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		// repetition
 		for {
 			p = p.predict()
-			v2ErrorStack := p.errorStack
-			p.errorStack = &parserErrorStack{}
+			p.errorStack.push()
 			v2temp, err = p.stateTerm()
-			if p.errorStack.coalesce() != nil {
-				v2ErrorStack.merge(p.errorStack)
-			}
-			p.errorStack = v2ErrorStack
+			p.errorStack.pop()
 			if err != nil {
 				p = p.backtrack()
 				err = nil
@@ -508,58 +428,34 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 	var v5 *GOR
 	var v6 *GOR
 	a1Pos = 1
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateLex()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err != nil {
 		a1Pos = 2
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateName()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err != nil {
 			a1Pos = 3
-			v3ErrorStack := p.errorStack
-			p.errorStack = &parserErrorStack{}
+			p.errorStack.push()
 			v3, err = p.stateLiteral()
-			if p.errorStack.coalesce() != nil {
-				v3ErrorStack.merge(p.errorStack)
-			}
-			p.errorStack = v3ErrorStack
+			p.errorStack.pop()
 			if err != nil {
 				a1Pos = 4
-				v4ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				v4, err = p.stateGroup()
-				if p.errorStack.coalesce() != nil {
-					v4ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v4ErrorStack
+				p.errorStack.pop()
 				if err != nil {
 					a1Pos = 5
-					v5ErrorStack := p.errorStack
-					p.errorStack = &parserErrorStack{}
+					p.errorStack.push()
 					v5, err = p.stateOption()
-					if p.errorStack.coalesce() != nil {
-						v5ErrorStack.merge(p.errorStack)
-					}
-					p.errorStack = v5ErrorStack
+					p.errorStack.pop()
 					if err != nil {
 						a1Pos = 6
-						v6ErrorStack := p.errorStack
-						p.errorStack = &parserErrorStack{}
+						p.errorStack.push()
 						v6, err = p.stateRepetition()
-						if p.errorStack.coalesce() != nil {
-							v6ErrorStack.merge(p.errorStack)
-						}
-						p.errorStack = v6ErrorStack
+						p.errorStack.pop()
 						if err != nil {
 							a1Pos = -1
 						}
@@ -613,13 +509,9 @@ func (p *pbpgParser) stateGroup() (*GOR, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateExpression()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal(")")
 			if err != nil {
@@ -650,13 +542,9 @@ func (p *pbpgParser) stateOption() (*GOR, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateExpression()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("]")
 			if err != nil {
@@ -687,13 +575,9 @@ func (p *pbpgParser) stateRepetition() (*GOR, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateExpression()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("}")
 			if err != nil {
@@ -774,13 +658,9 @@ func (p *pbpgParser) stateLiteral() (string, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateQuotedString()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("\"")
 			if err != nil {
@@ -946,7 +826,7 @@ type pbpgParser struct {
 	Data        *pbpgData
 	errorStack  *parserErrorStack
 
-	predictStack []*pbpgParser
+	posStack []int
 }
 
 func newpbpgParser(input string, data *pbpgData) *pbpgParser {
@@ -954,7 +834,11 @@ func newpbpgParser(input string, data *pbpgData) *pbpgParser {
 		input:       input,
 		lineOffsets: pbpgGenerateLineOffsets(input),
 		Data:        data,
-		errorStack:  &parserErrorStack{},
+		errorStack: &parserErrorStack{
+			stack:  make([]parseError, 0, 64),
+			scopes: make([]int, 0, 64),
+		},
+		posStack: make([]int, 0, 64),
 	}
 }
 
@@ -971,9 +855,10 @@ func pbpgGenerateLineOffsets(input string) []int {
 	return ret
 }
 
+// literal runs on every token match attempt during speculative parsing, so
+// it must not allocate; expected-token errors are interned in the generated
+// parserLiteralErrs map.
 func (p *pbpgParser) literal(want string) (string, error) {
-	var errExpected = fmt.Errorf("expected %v", want)
-
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -984,36 +869,44 @@ func (p *pbpgParser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", errExpected
+	if err, ok := parserLiteralErrs[want]; ok {
+		return "", err
+	}
+	return "", fmt.Errorf("expected %v", want)
 }
 
+// predict/backtrack/accept save and restore the parser position around a
+// speculative parse attempt.  Only pos is mutable speculative state (input,
+// lineOffsets, Data, and errorStack are shared), so a position stack on the
+// receiver replaces the previous scheme of allocating a full parser copy per
+// attempt.
 func (p *pbpgParser) predict() *pbpgParser {
-	p.predictStack = append(p.predictStack, p)
-	return &pbpgParser{
-		input:        p.input,
-		pos:          p.pos,
-		lineOffsets:  p.lineOffsets,
-		predictStack: p.predictStack,
-		errorStack:   p.errorStack,
-		Data:         p.Data,
-	}
+	p.posStack = append(p.posStack, p.pos)
+	return p
 }
 
 func (p *pbpgParser) backtrack() *pbpgParser {
-	pp := p.predictStack[len(p.predictStack)-1]
-	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.errorStack = p.errorStack
-	return pp
+	p.pos = p.posStack[len(p.posStack)-1]
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
 func (p *pbpgParser) accept() *pbpgParser {
-	pp := p.backtrack()
-	pp.pos = p.pos
-	return pp
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
+// parserErrorStack accumulates parse errors in a single reusable backing
+// array.  Speculative parse attempts open a scope (push) around each state
+// call and close it afterwards (pop); recorded errors are kept when a scope
+// pops, while clear, coalesce, and depth operate on the innermost open scope
+// only.  This avoids allocating a fresh error stack for every speculative
+// attempt, which both burns CPU and creates a new runtime memory-profile
+// bucket for every unique recursion stack in long-running processes.
 type parserErrorStack struct {
-	stack []*parseError
+	stack  []parseError
+	scopes []int
+	es     []error // scratch buffer reused by coalesce
 }
 
 type parseError struct {
@@ -1021,27 +914,40 @@ type parseError struct {
 	pos int
 }
 
-func (e *parserErrorStack) clear() {
-	e.stack = []*parseError{}
+// push opens an error scope around a speculative parse attempt.
+func (e *parserErrorStack) push() {
+	e.scopes = append(e.scopes, len(e.stack))
 }
 
-func (e *parserErrorStack) merge(e2 *parserErrorStack) {
-	e.stack = append(e.stack, e2.stack...)
+// pop closes the innermost scope; recorded errors remain.
+func (e *parserErrorStack) pop() {
+	e.scopes = e.scopes[:len(e.scopes)-1]
+}
+
+func (e *parserErrorStack) scopeBase() int {
+	if n := len(e.scopes); n > 0 {
+		return e.scopes[n-1]
+	}
+	return 0
+}
+
+func (e *parserErrorStack) clear() {
+	e.stack = e.stack[:e.scopeBase()]
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
-	e.stack = append(e.stack, &parseError{err: err, pos: pos})
+	e.stack = append(e.stack, parseError{err: err, pos: pos})
 }
 
 func (e *parserErrorStack) coalesce() error {
 	var bestDepth int
-	var es []error
+	es := e.es[:0]
 
 COALESCE_OUTER:
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > bestDepth {
 			bestDepth = v.pos
-			es = []error{v.err}
+			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
 			// deduplicate errors at a given depth
 			for _, w := range es {
@@ -1052,27 +958,63 @@ COALESCE_OUTER:
 			es = append(es, v.err)
 		}
 	}
+	e.es = es[:0]
 
 	if len(es) == 0 {
 		return nil
 	} else if len(es) == 1 {
 		return es[0]
-	} else {
-		// print the error stack in reverse order
-		var ret string
-		for i := len(es) - 1; i >= 0; i-- {
-			ret += es[i].Error() + "\n"
-		}
-		return errors.New(strings.TrimSpace(ret))
 	}
+	// defer building the joined message until something reads it; failure
+	// handlers coalesce on every failed speculative attempt and almost
+	// always discard the result, so rendering eagerly wastes both CPU and
+	// allocations on strings that keep growing as failures cascade
+	return &joinedError{es: append([]error(nil), es...)}
+}
+
+// joinedError is a multi-error whose message is rendered lazily and
+// memoized.  It prints the error stack in reverse order.
+type joinedError struct {
+	es  []error
+	msg string
+}
+
+func (j *joinedError) Error() string {
+	if j.msg == "" {
+		var sb strings.Builder
+		for i := len(j.es) - 1; i >= 0; i-- {
+			sb.WriteString(j.es[i].Error())
+			sb.WriteByte('\n')
+		}
+		j.msg = strings.TrimSpace(sb.String())
+	}
+	return j.msg
 }
 
 func (e *parserErrorStack) depth() int {
 	var ret int
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
 			ret = v.pos
 		}
 	}
 	return ret
+}
+
+var parserLiteralErrs = map[string]error{
+	"\"":     errors.New("expected \""),
+	"#":      errors.New("expected #"),
+	"(":      errors.New("expected ("),
+	")":      errors.New("expected )"),
+	".":      errors.New("expected ."),
+	"=":      errors.New("expected ="),
+	"Action": errors.New("expected Action"),
+	"Error":  errors.New("expected Error"),
+	"[":      errors.New("expected ["),
+	"]":      errors.New("expected ]"),
+	"lex":    errors.New("expected lex"),
+	"type":   errors.New("expected type"),
+	"{":      errors.New("expected {"),
+	"|":      errors.New("expected |"),
+	"}":      errors.New("expected }"),
 }
