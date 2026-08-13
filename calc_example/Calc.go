@@ -32,32 +32,20 @@ func (p *CalcParser) stateExpression() (int, error) {
 	var v2 []string
 	var v3temp int
 	var v3 []int
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateTerm()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		// repetition
 		for {
 			p = p.predict()
-			v2ErrorStack := p.errorStack
-			p.errorStack = &parserErrorStack{}
+			p.errorStack.push()
 			v2temp, err = p.stateAddOp()
-			if p.errorStack.coalesce() != nil {
-				v2ErrorStack.merge(p.errorStack)
-			}
-			p.errorStack = v2ErrorStack
+			p.errorStack.pop()
 			if err == nil {
-				v3ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				v3temp, err = p.stateTerm()
-				if p.errorStack.coalesce() != nil {
-					v3ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v3ErrorStack
+				p.errorStack.pop()
 			}
 			if err != nil {
 				p = p.backtrack()
@@ -101,32 +89,20 @@ func (p *CalcParser) stateTerm() (int, error) {
 	var v2 []string
 	var v3temp int
 	var v3 []int
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateFactor()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err == nil {
 		// repetition
 		for {
 			p = p.predict()
-			v2ErrorStack := p.errorStack
-			p.errorStack = &parserErrorStack{}
+			p.errorStack.push()
 			v2temp, err = p.stateMultOp()
-			if p.errorStack.coalesce() != nil {
-				v2ErrorStack.merge(p.errorStack)
-			}
-			p.errorStack = v2ErrorStack
+			p.errorStack.pop()
 			if err == nil {
-				v3ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				v3temp, err = p.stateFactor()
-				if p.errorStack.coalesce() != nil {
-					v3ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v3ErrorStack
+				p.errorStack.pop()
 			}
 			if err != nil {
 				p = p.backtrack()
@@ -177,13 +153,9 @@ func (p *CalcParser) stateFactor() (int, error) {
 		p.errorStack.error(err, p.pos)
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateExpression()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal(")")
 			if err != nil {
@@ -198,13 +170,9 @@ func (p *CalcParser) stateFactor() (int, error) {
 	}
 	if err != nil {
 		a1Pos = 2
-		v4ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v4, err = p.stateNumber()
-		if p.errorStack.coalesce() != nil {
-			v4ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v4ErrorStack
+		p.errorStack.pop()
 		if err != nil {
 			a1Pos = -1
 		}
@@ -320,13 +288,9 @@ func (p *CalcParser) stateNumber() (int, error) {
 	var v3 []string
 	// option
 	p = p.predict()
-	v1ErrorStack := p.errorStack
-	p.errorStack = &parserErrorStack{}
+	p.errorStack.push()
 	v1, err = p.stateNeg()
-	if p.errorStack.coalesce() != nil {
-		v1ErrorStack.merge(p.errorStack)
-	}
-	p.errorStack = v1ErrorStack
+	p.errorStack.pop()
 	if err != nil {
 		p = p.backtrack()
 		err = nil
@@ -334,24 +298,16 @@ func (p *CalcParser) stateNumber() (int, error) {
 		p = p.accept()
 	}
 	if err == nil {
-		v2ErrorStack := p.errorStack
-		p.errorStack = &parserErrorStack{}
+		p.errorStack.push()
 		v2, err = p.stateDigit()
-		if p.errorStack.coalesce() != nil {
-			v2ErrorStack.merge(p.errorStack)
-		}
-		p.errorStack = v2ErrorStack
+		p.errorStack.pop()
 		if err == nil {
 			// repetition
 			for {
 				p = p.predict()
-				v3ErrorStack := p.errorStack
-				p.errorStack = &parserErrorStack{}
+				p.errorStack.push()
 				v3temp, err = p.stateDigit()
-				if p.errorStack.coalesce() != nil {
-					v3ErrorStack.merge(p.errorStack)
-				}
-				p.errorStack = v3ErrorStack
+				p.errorStack.pop()
 				if err != nil {
 					p = p.backtrack()
 					err = nil
@@ -517,7 +473,7 @@ type CalcParser struct {
 	Data        *CalcData
 	errorStack  *parserErrorStack
 
-	predictStack []*CalcParser
+	posStack []int
 }
 
 func newCalcParser(input string, data *CalcData) *CalcParser {
@@ -525,7 +481,11 @@ func newCalcParser(input string, data *CalcData) *CalcParser {
 		input:       input,
 		lineOffsets: CalcGenerateLineOffsets(input),
 		Data:        data,
-		errorStack:  &parserErrorStack{},
+		errorStack: &parserErrorStack{
+			stack:  make([]parseError, 0, 64),
+			scopes: make([]int, 0, 64),
+		},
+		posStack: make([]int, 0, 64),
 	}
 }
 
@@ -542,9 +502,10 @@ func CalcGenerateLineOffsets(input string) []int {
 	return ret
 }
 
+// literal runs on every token match attempt during speculative parsing, so
+// it must not allocate; expected-token errors are interned in the generated
+// parserLiteralErrs map.
 func (p *CalcParser) literal(want string) (string, error) {
-	var errExpected = fmt.Errorf("expected %v", want)
-
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
 		count += s
@@ -555,36 +516,44 @@ func (p *CalcParser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	return "", errExpected
+	if err, ok := parserLiteralErrs[want]; ok {
+		return "", err
+	}
+	return "", fmt.Errorf("expected %v", want)
 }
 
+// predict/backtrack/accept save and restore the parser position around a
+// speculative parse attempt.  Only pos is mutable speculative state (input,
+// lineOffsets, Data, and errorStack are shared), so a position stack on the
+// receiver replaces the previous scheme of allocating a full parser copy per
+// attempt.
 func (p *CalcParser) predict() *CalcParser {
-	p.predictStack = append(p.predictStack, p)
-	return &CalcParser{
-		input:        p.input,
-		pos:          p.pos,
-		lineOffsets:  p.lineOffsets,
-		predictStack: p.predictStack,
-		errorStack:   p.errorStack,
-		Data:         p.Data,
-	}
+	p.posStack = append(p.posStack, p.pos)
+	return p
 }
 
 func (p *CalcParser) backtrack() *CalcParser {
-	pp := p.predictStack[len(p.predictStack)-1]
-	pp.predictStack = pp.predictStack[:len(pp.predictStack)-1]
-	pp.errorStack = p.errorStack
-	return pp
+	p.pos = p.posStack[len(p.posStack)-1]
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
 func (p *CalcParser) accept() *CalcParser {
-	pp := p.backtrack()
-	pp.pos = p.pos
-	return pp
+	p.posStack = p.posStack[:len(p.posStack)-1]
+	return p
 }
 
+// parserErrorStack accumulates parse errors in a single reusable backing
+// array.  Speculative parse attempts open a scope (push) around each state
+// call and close it afterwards (pop); recorded errors are kept when a scope
+// pops, while clear, coalesce, and depth operate on the innermost open scope
+// only.  This avoids allocating a fresh error stack for every speculative
+// attempt, which both burns CPU and creates a new runtime memory-profile
+// bucket for every unique recursion stack in long-running processes.
 type parserErrorStack struct {
-	stack []*parseError
+	stack  []parseError
+	scopes []int
+	es     []error // scratch buffer reused by coalesce
 }
 
 type parseError struct {
@@ -592,27 +561,40 @@ type parseError struct {
 	pos int
 }
 
-func (e *parserErrorStack) clear() {
-	e.stack = []*parseError{}
+// push opens an error scope around a speculative parse attempt.
+func (e *parserErrorStack) push() {
+	e.scopes = append(e.scopes, len(e.stack))
 }
 
-func (e *parserErrorStack) merge(e2 *parserErrorStack) {
-	e.stack = append(e.stack, e2.stack...)
+// pop closes the innermost scope; recorded errors remain.
+func (e *parserErrorStack) pop() {
+	e.scopes = e.scopes[:len(e.scopes)-1]
+}
+
+func (e *parserErrorStack) scopeBase() int {
+	if n := len(e.scopes); n > 0 {
+		return e.scopes[n-1]
+	}
+	return 0
+}
+
+func (e *parserErrorStack) clear() {
+	e.stack = e.stack[:e.scopeBase()]
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
-	e.stack = append(e.stack, &parseError{err: err, pos: pos})
+	e.stack = append(e.stack, parseError{err: err, pos: pos})
 }
 
 func (e *parserErrorStack) coalesce() error {
 	var bestDepth int
-	var es []error
+	es := e.es[:0]
 
 COALESCE_OUTER:
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > bestDepth {
 			bestDepth = v.pos
-			es = []error{v.err}
+			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
 			// deduplicate errors at a given depth
 			for _, w := range es {
@@ -623,27 +605,64 @@ COALESCE_OUTER:
 			es = append(es, v.err)
 		}
 	}
+	e.es = es[:0]
 
 	if len(es) == 0 {
 		return nil
 	} else if len(es) == 1 {
 		return es[0]
-	} else {
-		// print the error stack in reverse order
-		var ret string
-		for i := len(es) - 1; i >= 0; i-- {
-			ret += es[i].Error() + "\n"
-		}
-		return errors.New(strings.TrimSpace(ret))
 	}
+	// defer building the joined message until something reads it; failure
+	// handlers coalesce on every failed speculative attempt and almost
+	// always discard the result, so rendering eagerly wastes both CPU and
+	// allocations on strings that keep growing as failures cascade
+	return &joinedError{es: append([]error(nil), es...)}
+}
+
+// joinedError is a multi-error whose message is rendered lazily and
+// memoized.  It prints the error stack in reverse order.
+type joinedError struct {
+	es  []error
+	msg string
+}
+
+func (j *joinedError) Error() string {
+	if j.msg == "" {
+		var sb strings.Builder
+		for i := len(j.es) - 1; i >= 0; i-- {
+			sb.WriteString(j.es[i].Error())
+			sb.WriteByte('\n')
+		}
+		j.msg = strings.TrimSpace(sb.String())
+	}
+	return j.msg
 }
 
 func (e *parserErrorStack) depth() int {
 	var ret int
-	for _, v := range e.stack {
+	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
 			ret = v.pos
 		}
 	}
 	return ret
+}
+
+var parserLiteralErrs = map[string]error{
+	"(": errors.New("expected ("),
+	")": errors.New("expected )"),
+	"*": errors.New("expected *"),
+	"+": errors.New("expected +"),
+	"-": errors.New("expected -"),
+	"/": errors.New("expected /"),
+	"0": errors.New("expected 0"),
+	"1": errors.New("expected 1"),
+	"2": errors.New("expected 2"),
+	"3": errors.New("expected 3"),
+	"4": errors.New("expected 4"),
+	"5": errors.New("expected 5"),
+	"6": errors.New("expected 6"),
+	"7": errors.New("expected 7"),
+	"8": errors.New("expected 8"),
+	"9": errors.New("expected 9"),
 }
