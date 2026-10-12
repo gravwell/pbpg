@@ -8,6 +8,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strconv"
@@ -29,13 +30,69 @@ type pbpgData struct {
 	typeMap       map[string]string
 	stateMap      map[string]*Expression // list of productions
 	orderedStates []string               // list of productions in source order
-	out           strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
+	out           bytes.Buffer           // output buffer, which is combined with the boiler plate code and formatted on success
 
 	statesUsed map[string]bool // list of states referenced in terms. Used for grammar validation.
 
 	literalsUsed map[string]bool // list of literals referenced in terms. Used to emit the interned literal error map.
 
 	entryPoint string // The name of the first encountered production.
+
+	// savepoints and undo make pbpgData a pbpgSavepointer, so an attempt
+	// that fails takes back the types, productions, and output its actions
+	// added. undo holds a function that reverts each map entry set while an
+	// attempt is open, oldest first.
+	savepoints []pbpgSavepoint
+	undo       []func()
+}
+
+// pbpgSavepoint is the state to restore if the attempt that saved it fails.
+type pbpgSavepoint struct {
+	out, orderedStates, undo int
+	entryPoint               string
+}
+
+var _ pbpgSavepointer = (*pbpgData)(nil)
+
+func (p *pbpgData) savepoint() {
+	p.savepoints = append(p.savepoints, pbpgSavepoint{
+		out:           p.out.Len(),
+		orderedStates: len(p.orderedStates),
+		undo:          len(p.undo),
+		entryPoint:    p.entryPoint,
+	})
+}
+
+func (p *pbpgData) rollback() {
+	s := p.savepoints[len(p.savepoints)-1]
+	p.savepoints = p.savepoints[:len(p.savepoints)-1]
+	for i := len(p.undo) - 1; i >= s.undo; i-- {
+		p.undo[i]()
+	}
+	p.undo = p.undo[:s.undo]
+	p.out.Truncate(s.out)
+	p.orderedStates = p.orderedStates[:s.orderedStates]
+	p.entryPoint = s.entryPoint
+}
+
+func (p *pbpgData) release() {
+	p.savepoints = p.savepoints[:len(p.savepoints)-1]
+	if len(p.savepoints) == 0 {
+		p.undo = p.undo[:0]
+	}
+}
+
+// setEntry sets m[k] to v, and while an attempt is open, records how to take
+// it back.
+func setEntry[V any](p *pbpgData, m map[string]V, k string, v V) {
+	if len(p.savepoints) > 0 {
+		if old, ok := m[k]; ok {
+			p.undo = append(p.undo, func() { m[k] = old })
+		} else {
+			p.undo = append(p.undo, func() { delete(m, k) })
+		}
+	}
+	m[k] = v
 }
 
 type Variable struct {
@@ -573,14 +630,14 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		if p.statesUsed == nil {
 			p.statesUsed = make(map[string]bool)
 		}
-		p.statesUsed[term.name] = true
+		setEntry(p, p.statesUsed, term.name, true)
 
 		p.out.WriteString("p.errorStack.pop()\n")
 	case TERM_LITERAL:
 		if p.literalsUsed == nil {
 			p.literalsUsed = make(map[string]bool)
 		}
-		p.literalsUsed[term.literal] = true
+		setEntry(p, p.literalsUsed, term.literal, true)
 		if hasAction {
 			if rep {
 				p.out.WriteString(fmt.Sprintf("v%vtemp, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
@@ -728,11 +785,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth: by identity, which
-			// catches the interned literal errors without rendering a
-			// message, and then by message
+			// deduplicate errors at a given depth by message. Comparing the
+			// error values first measured slower, and it panics on two
+			// errors of the same uncomparable type.
 			for _, w := range es {
-				if identicalErrs(w, v.err) || w.Error() == v.err.Error() {
+				if w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
@@ -751,15 +808,6 @@ COALESCE_OUTER:
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
 	return &joinedError{es: append([]error(nil), es...)}
-}
-
-// identicalErrs reports whether a and b are the same error value. Comparing
-// two interface values panics when both hold the same uncomparable dynamic
-// type, which user-supplied errors may; those are treated as distinct so the
-// caller falls through to comparing messages.
-func identicalErrs(a, b error) (identical bool) {
-	defer func() { _ = recover() }()
-	return a == b
 }
 
 // joinedError is a multi-error whose message is rendered lazily and

@@ -143,7 +143,7 @@ func (p *pbpgData) actionTypes(pos int, v1 string, v2 string, v3 string) {
 	if _, ok := p.typeMap[v2]; ok {
 		log.Fatalf("type %v redeclared", v2)
 	}
-	p.typeMap[v2] = v3
+	setEntry(p, p.typeMap, v2, v3)
 
 }
 
@@ -244,7 +244,7 @@ func (p *pbpgData) actionProduction(pos int, v1 string, v2 string, v3 *Expressio
 	if p.stateMap[v1] != nil {
 		log.Fatalf("%v redeclared", v1)
 	}
-	p.stateMap[v1] = v3
+	setEntry(p, p.stateMap, v1, v3)
 	p.orderedStates = append(p.orderedStates, v1)
 
 	p.emitState(v1, v3, v5, v6)
@@ -1055,11 +1055,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth: by identity, which
-			// catches the interned literal errors without rendering a
-			// message, and then by message
+			// deduplicate errors at a given depth by message. Comparing the
+			// error values first measured slower, and it panics on two
+			// errors of the same uncomparable type.
 			for _, w := range es {
-				if identicalErrs(w, v.err) || w.Error() == v.err.Error() {
+				if w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
@@ -1078,15 +1078,6 @@ COALESCE_OUTER:
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
 	return &joinedError{es: append([]error(nil), es...)}
-}
-
-// identicalErrs reports whether a and b are the same error value. Comparing
-// two interface values panics when both hold the same uncomparable dynamic
-// type, which user-supplied errors may; those are treated as distinct so the
-// caller falls through to comparing messages.
-func identicalErrs(a, b error) (identical bool) {
-	defer func() { _ = recover() }()
-	return a == b
 }
 
 // joinedError is a multi-error whose message is rendered lazily and

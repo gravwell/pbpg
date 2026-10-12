@@ -33,6 +33,8 @@ func (p *ProbeData) release() {
 	p.marks = p.marks[:len(p.marks)-1]
 }
 
+var _ ProbeSavepointer = (*ProbeData)(nil)
+
 // main parses each argument, printing the result, the error, the
 // declarations, and the savepoints left open, which should be none.
 func main() {

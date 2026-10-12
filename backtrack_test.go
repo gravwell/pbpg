@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,68 @@ func TestBacktracking(t *testing.T) {
 	}
 	if got, want := run(dir, "go", args...), strings.Join(want, "\n")+"\n"; got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestDataSavepoints checks that pbpgData takes back what a failed attempt's
+// actions added, including the attempts nested in it, and keeps what a
+// successful attempt's actions added.
+func TestDataSavepoints(t *testing.T) {
+	p := &pbpgData{
+		typeMap:  map[string]string{"A": "int"},
+		stateMap: make(map[string]*Expression),
+	}
+	p.out.WriteString("header\n")
+	check := func(types map[string]string, states []string, entry, out string) {
+		t.Helper()
+		if !reflect.DeepEqual(p.typeMap, types) {
+			t.Errorf("typeMap = %v, want %v", p.typeMap, types)
+		}
+		if len(p.stateMap) != len(states) || len(p.orderedStates) != len(states) {
+			t.Errorf("stateMap = %v, orderedStates = %v, want %v", p.stateMap, p.orderedStates, states)
+		}
+		for i, v := range states {
+			if p.stateMap[v] == nil || i < len(p.orderedStates) && p.orderedStates[i] != v {
+				t.Errorf("stateMap = %v, orderedStates = %v, want %v", p.stateMap, p.orderedStates, states)
+			}
+		}
+		if p.entryPoint != entry {
+			t.Errorf("entryPoint = %q, want %q", p.entryPoint, entry)
+		}
+		if p.out.String() != out {
+			t.Errorf("out = %q, want %q", p.out.String(), out)
+		}
+	}
+	production := func(name string) {
+		setEntry(p, p.stateMap, name, &Expression{})
+		p.orderedStates = append(p.orderedStates, name)
+		if p.entryPoint == "" {
+			p.entryPoint = name
+		}
+		p.out.WriteString("func state" + name + "()\n")
+	}
+
+	// an attempt released inside one rolled back is rolled back with it
+	p.savepoint()
+	setEntry(p, p.typeMap, "B", "string")
+	p.savepoint()
+	setEntry(p, p.typeMap, "A", "bool")
+	production("S")
+	p.release()
+	check(map[string]string{"A": "bool", "B": "string"}, []string{"S"}, "S", "header\nfunc stateS()\n")
+	p.rollback()
+	check(map[string]string{"A": "int"}, nil, "", "header\n")
+
+	// a rolled back attempt inside one released leaves the outer one's
+	p.savepoint()
+	production("T")
+	p.savepoint()
+	setEntry(p, p.typeMap, "T", "bool")
+	production("U")
+	p.rollback()
+	p.release()
+	check(map[string]string{"A": "int"}, []string{"T"}, "T", "header\nfunc stateT()\n")
+	if len(p.savepoints) != 0 || len(p.undo) != 0 {
+		t.Errorf("%d savepoints and %d undos left", len(p.savepoints), len(p.undo))
 	}
 }
