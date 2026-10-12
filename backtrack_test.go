@@ -75,6 +75,18 @@ func TestBacktracking(t *testing.T) {
 		// a failed option's repetition leaves its slice empty
 		{"6 a, b", `label="" labels=[] name="a" names=["b"] | <nil> | [] | 0`},
 		{"6 a, b: c", `label="a" labels=["b"] name="c" names=[] | <nil> | [] | 0`},
+		// a nested repetition's slice holds one entry per match of its
+		// own, with no entry for an iteration of the enclosing one
+		{"7 a!!,", `words=["a"] bangs=["!" "!"] commas=[","] | <nil> | [] | 0`},
+		// a failed iteration takes back what its nested repetition
+		// appended, so the trailing input is left unparsed
+		{"7 a!,b!!", "words=[\"a\"] bangs=[\"!\"] commas=[\",\"] | expected ,\nexpected ! | [] | 0"},
+		// a backtracked attempt restores the alternative positions it set
+		{"8 a", `a1Pos=0 name="a" | <nil> | [] | 0`},
+		{"8 b:x", `a1Pos=2 name="x" | <nil> | [] | 0`},
+		// sibling alternative groups get distinct positions
+		{"9 ac", `a1Pos=1 a2Pos=1 | <nil> | [] | 0`},
+		{"9 bd", `a1Pos=2 a2Pos=2 | <nil> | [] | 0`},
 	}
 	args := []string{"run", "."}
 	var want []string

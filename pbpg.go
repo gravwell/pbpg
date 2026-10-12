@@ -193,7 +193,7 @@ func (p *pbpgParser) stateProduction() error {
 			if err != nil {
 				p = p.backtrack()
 				err = nil
-				v3 = nil
+				v3 = *new(*Expression)
 			} else {
 				p = p.accept()
 			}
@@ -357,7 +357,7 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 		for {
 			p = p.predict()
 			v2temp = ""
-			v3temp = nil
+			v3temp = *new(*Alternative)
 			v2temp, err = p.literal("|")
 			if err != nil {
 				p.errorStack.error(err, p.pos)
@@ -403,7 +403,7 @@ func (p *pbpgParser) stateAlternative() (*Alternative, error) {
 		// repetition
 		for {
 			p = p.predict()
-			v2temp = nil
+			v2temp = *new(*Term)
 			p.errorStack.push()
 			v2temp, err = p.stateTerm()
 			p.errorStack.pop()
@@ -482,7 +482,7 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 				p.errorStack.pop()
 				if err != nil {
 					p = p.backtrack()
-					v4 = nil
+					v4 = *new(*GOR)
 				} else {
 					p = p.accept()
 				}
@@ -494,7 +494,7 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 					p.errorStack.pop()
 					if err != nil {
 						p = p.backtrack()
-						v5 = nil
+						v5 = *new(*GOR)
 					} else {
 						p = p.accept()
 					}

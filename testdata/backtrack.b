@@ -70,10 +70,14 @@ type Opt string
 type Rep string
 type OptRep string
 type List string
+type Nest string
+type APos string
+type Sib string
 type Word string
 
 Start	= ( "1" Decls ) | ( "2" Alts ) | ( "3" Opt ) | ( "4" Rep ) |
-	  ( "5" OptRep ) | ( "6" List ) .				Action {
+	  ( "5" OptRep ) | ( "6" List ) | ( "7" Nest ) | ( "8" APos ) |
+	  ( "9" Sib ) .							Action {
 									switch a1Pos {
 									case 1:
 										return v2
@@ -87,6 +91,12 @@ Start	= ( "1" Decls ) | ( "2" Alts ) | ( "3" Opt ) | ( "4" Rep ) |
 										return v10
 									case 6:
 										return v12
+									case 7:
+										return v14
+									case 8:
+										return v16
+									case 9:
+										return v18
 									}
 									return ""
 								}
@@ -112,4 +122,11 @@ OptRep	= { [ Word ":" ] "!" } .				Action { return fmt.Sprintf("labels=%q colons
 List	= [ Word { "," Word } ":" ] Word { "," Word } .		Action {
 									return fmt.Sprintf("label=%q labels=%q name=%q names=%q", v1, v3, v5, v7)
 								}
+# A nested repetition's slice holds one entry per match of its own, and a
+# failed iteration takes back what its nested repetition appended.
+Nest	= { Word { "!" } "," } .				Action { return fmt.Sprintf("words=%q bangs=%q commas=%q", v1, v2, v3) }
+# A backtracked attempt restores the alternative positions it set.
+APos	= [ ( "a" | "b" ) ":" ] Word .				Action { return fmt.Sprintf("a1Pos=%d name=%q", a1Pos, v4) }
+# Sibling alternative groups get distinct positions.
+Sib	= ( "a" | "b" ) ( "c" | "d" ) .				Action { return fmt.Sprintf("a1Pos=%d a2Pos=%d", a1Pos, a2Pos) }
 Word	= lex(word) .						Action { return v1 }
