@@ -150,9 +150,15 @@ func (p *pbpgData) actionTypes(pos int, v1 string, v2 string, v3 string) {
 // Line = Comment | Production
 func (p *pbpgParser) stateLine() error {
 	var err error
+	p = p.predict()
 	p.errorStack.push()
 	err = p.stateComment()
 	p.errorStack.pop()
+	if err != nil {
+		p = p.backtrack()
+	} else {
+		p = p.accept()
+	}
 	if err != nil {
 		p.errorStack.push()
 		err = p.stateProduction()
@@ -187,6 +193,7 @@ func (p *pbpgParser) stateProduction() error {
 			if err != nil {
 				p = p.backtrack()
 				err = nil
+				v3 = nil
 			} else {
 				p = p.accept()
 			}
@@ -204,6 +211,7 @@ func (p *pbpgParser) stateProduction() error {
 					if err != nil {
 						p = p.backtrack()
 						err = nil
+						v5 = ""
 					} else {
 						p = p.accept()
 					}
@@ -216,6 +224,7 @@ func (p *pbpgParser) stateProduction() error {
 						if err != nil {
 							p = p.backtrack()
 							err = nil
+							v6 = ""
 						} else {
 							p = p.accept()
 						}
@@ -347,6 +356,8 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 		// repetition
 		for {
 			p = p.predict()
+			v2temp = ""
+			v3temp = nil
 			v2temp, err = p.literal("|")
 			if err != nil {
 				p.errorStack.error(err, p.pos)
@@ -392,6 +403,7 @@ func (p *pbpgParser) stateAlternative() (*Alternative, error) {
 		// repetition
 		for {
 			p = p.predict()
+			v2temp = nil
 			p.errorStack.push()
 			v2temp, err = p.stateTerm()
 			p.errorStack.pop()
@@ -428,29 +440,64 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 	var v5 *GOR
 	var v6 *GOR
 	a1Pos = 1
+	p = p.predict()
 	p.errorStack.push()
 	v1, err = p.stateLex()
 	p.errorStack.pop()
 	if err != nil {
+		p = p.backtrack()
+		v1 = ""
+	} else {
+		p = p.accept()
+	}
+	if err != nil {
 		a1Pos = 2
+		p = p.predict()
 		p.errorStack.push()
 		v2, err = p.stateName()
 		p.errorStack.pop()
 		if err != nil {
+			p = p.backtrack()
+			v2 = ""
+		} else {
+			p = p.accept()
+		}
+		if err != nil {
 			a1Pos = 3
+			p = p.predict()
 			p.errorStack.push()
 			v3, err = p.stateLiteral()
 			p.errorStack.pop()
 			if err != nil {
+				p = p.backtrack()
+				v3 = ""
+			} else {
+				p = p.accept()
+			}
+			if err != nil {
 				a1Pos = 4
+				p = p.predict()
 				p.errorStack.push()
 				v4, err = p.stateGroup()
 				p.errorStack.pop()
 				if err != nil {
+					p = p.backtrack()
+					v4 = nil
+				} else {
+					p = p.accept()
+				}
+				if err != nil {
 					a1Pos = 5
+					p = p.predict()
 					p.errorStack.push()
 					v5, err = p.stateOption()
 					p.errorStack.pop()
+					if err != nil {
+						p = p.backtrack()
+						v5 = nil
+					} else {
+						p = p.accept()
+					}
 					if err != nil {
 						a1Pos = 6
 						p.errorStack.push()
@@ -827,10 +874,13 @@ type pbpgParser struct {
 	errorStack  *parserErrorStack
 
 	posStack []int
+
+	// Data, when it implements pbpgSavepointer
+	savepoints pbpgSavepointer
 }
 
 func newpbpgParser(input string, data *pbpgData) *pbpgParser {
-	return &pbpgParser{
+	p := &pbpgParser{
 		input:       input,
 		lineOffsets: pbpgGenerateLineOffsets(input),
 		Data:        data,
@@ -840,6 +890,10 @@ func newpbpgParser(input string, data *pbpgData) *pbpgParser {
 		},
 		posStack: make([]int, 0, 64),
 	}
+	if sp, ok := interface{}(data).(pbpgSavepointer); ok && data != nil {
+		p.savepoints = sp
+	}
+	return p
 }
 
 func pbpgGenerateLineOffsets(input string) []int {
@@ -875,24 +929,49 @@ func (p *pbpgParser) literal(want string) (string, error) {
 	return "", fmt.Errorf("expected %v", want)
 }
 
-// predict/backtrack/accept save and restore the parser position around a
-// speculative parse attempt.  Only pos is mutable speculative state (input,
-// lineOffsets, Data, and errorStack are shared), so a position stack on the
-// receiver replaces the previous scheme of allocating a full parser copy per
-// attempt.
+// pbpgSavepointer is implemented by a pbpgData whose actions, lexer
+// functions, or error functions change state that backtracking must undo.
+// Backtracking restores the parser's position, but an action runs as soon as
+// its production matches, even in an attempt that fails afterwards, and a
+// lexer function runs on every attempt. When pbpgData implements it, the
+// parser calls savepoint as each speculative attempt begins, then rollback if
+// the attempt fails or release if it succeeds. The calls nest as the attempts
+// do: rollback restores the state saved by the latest savepoint not yet rolled
+// back or released, and release forgets that savepoint, keeping the changes
+// made since.
+type pbpgSavepointer interface {
+	savepoint()
+	rollback()
+	release()
+}
+
+// predict/backtrack/accept save and restore the parser's state around a
+// speculative parse attempt: its position, and Data's state when Data is a
+// pbpgSavepointer. input, lineOffsets, and errorStack are shared, so a
+// position stack on the receiver replaces the previous scheme of allocating a
+// full parser copy per attempt.
 func (p *pbpgParser) predict() *pbpgParser {
 	p.posStack = append(p.posStack, p.pos)
+	if p.savepoints != nil {
+		p.savepoints.savepoint()
+	}
 	return p
 }
 
 func (p *pbpgParser) backtrack() *pbpgParser {
 	p.pos = p.posStack[len(p.posStack)-1]
 	p.posStack = p.posStack[:len(p.posStack)-1]
+	if p.savepoints != nil {
+		p.savepoints.rollback()
+	}
 	return p
 }
 
 func (p *pbpgParser) accept() *pbpgParser {
 	p.posStack = p.posStack[:len(p.posStack)-1]
+	if p.savepoints != nil {
+		p.savepoints.release()
+	}
 	return p
 }
 
@@ -903,6 +982,12 @@ func (p *pbpgParser) accept() *pbpgParser {
 // only.  This avoids allocating a fresh error stack for every speculative
 // attempt, which both burns CPU and creates a new runtime memory-profile
 // bucket for every unique recursion stack in long-running processes.
+//
+// coalesce reports only the errors at the furthest position in a scope, so
+// a scope keeps only those: an error behind them isn't recorded, one past
+// them replaces them, and a scope that pops is merged into its parent the
+// same way. Every scope's errors are therefore at one position, and the
+// stack stays small however many speculative attempts fail.
 type parserErrorStack struct {
 	stack  []parseError
 	scopes []int
@@ -919,9 +1004,23 @@ func (e *parserErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
-// pop closes the innermost scope; recorded errors remain.
+// pop closes the innermost scope, merging it into the parent: only the
+// errors at the furthest position survive. The closing scope's errors are
+// dropped when they are behind the parent's own, they replace the parent's
+// errors when they are past them, and a tie keeps both.
 func (e *parserErrorStack) pop() {
+	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
+	outer, n := e.scopeBase(), len(e.stack)
+	if inner == n || inner == outer {
+		return
+	}
+	switch op, ip := e.stack[inner-1].pos, e.stack[n-1].pos; {
+	case ip < op:
+		e.stack = e.stack[:inner]
+	case ip > op:
+		e.stack = append(e.stack[:outer], e.stack[inner:]...)
+	}
 }
 
 func (e *parserErrorStack) scopeBase() int {
@@ -936,6 +1035,13 @@ func (e *parserErrorStack) clear() {
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
+	if base, n := e.scopeBase(), len(e.stack); n > base {
+		if top := e.stack[n-1].pos; pos < top {
+			return
+		} else if pos > top {
+			e.stack = e.stack[:base]
+		}
+	}
 	e.stack = append(e.stack, parseError{err: err, pos: pos})
 }
 
@@ -949,9 +1055,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth
+			// deduplicate errors at a given depth: by identity, which
+			// catches the interned literal errors without rendering a
+			// message, and then by message
 			for _, w := range es {
-				if w.Error() == v.err.Error() {
+				if identicalErrs(w, v.err) || w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
@@ -970,6 +1078,15 @@ COALESCE_OUTER:
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
 	return &joinedError{es: append([]error(nil), es...)}
+}
+
+// identicalErrs reports whether a and b are the same error value. Comparing
+// two interface values panics when both hold the same uncomparable dynamic
+// type, which user-supplied errors may; those are treated as distinct so the
+// caller falls through to comparing messages.
+func identicalErrs(a, b error) (identical bool) {
+	defer func() { _ = recover() }()
+	return a == b
 }
 
 // joinedError is a multi-error whose message is rendered lazily and

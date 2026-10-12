@@ -289,6 +289,64 @@ func (p *pbpgData) functionSignature(exp *Expression) string {
 	return strings.TrimSuffix(r, ",")
 }
 
+// zeroVars returns the statements that reset the variables of exp, numbered
+// from first, to their zero values, so that an action sees the terms of a
+// failed attempt as unmatched rather than as what they held when it failed.
+// In a repetition they're the temporaries of the current iteration, and
+// otherwise a repetition in exp has a slice, which is reset to nil. Without
+// an action or error block there are no variables to reset.
+func (p *pbpgData) zeroVars(exp *Expression, first int, rep bool, hasAction bool) string {
+	if !hasAction {
+		return ""
+	}
+	var r strings.Builder
+	c := first
+	for _, v := range exp.variables() {
+		ftype := "string"
+		if v.T == TERM_NAME {
+			var ok bool
+			if ftype, ok = p.typeMap[v.Value]; !ok {
+				continue
+			}
+		}
+		switch {
+		case rep:
+			r.WriteString(fmt.Sprintf("v%vtemp = %v\n", c, zeroValue(ftype)))
+		case v.Repetition:
+			r.WriteString(fmt.Sprintf("v%v = nil\n", c))
+		default:
+			r.WriteString(fmt.Sprintf("v%v = %v\n", c, zeroValue(ftype)))
+		}
+		c++
+	}
+	return r.String()
+}
+
+// zeroValue returns an expression for the zero value of the Go type ftype,
+// which is the rest of its type declaration's line.
+func zeroValue(ftype string) string {
+	ftype = strings.TrimSpace(ftype)
+	switch {
+	case ftype == "string":
+		return `""`
+	case ftype == "bool":
+		return "false"
+	case basicNumeric[ftype]:
+		return "0"
+	case strings.HasPrefix(ftype, "*"), strings.HasPrefix(ftype, "[]"),
+		strings.HasPrefix(ftype, "map["), strings.HasPrefix(ftype, "func("),
+		strings.HasPrefix(ftype, "chan "), ftype == "error":
+		return "nil"
+	}
+	return fmt.Sprintf("*new(%v)", ftype)
+}
+
+var basicNumeric = map[string]bool{
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"uintptr": true, "byte": true, "rune": true, "float32": true, "float64": true,
+}
+
 // An alternative contains one or more terms.
 type Alternative struct {
 	terms []*Term
@@ -300,6 +358,22 @@ func (a *Alternative) String() string {
 		s = append(s, v.String())
 	}
 	return strings.Join(s, " ")
+}
+
+// mayFailPartway reports whether the alternative can move the parser forward
+// and then fail. A literal that fails doesn't move it, and a group, option, or
+// repetition undoes its own failed attempts. Anything else can: a sequence can
+// fail after its first term matches, a production likewise, and a lexer
+// function can consume input along with its error.
+func (a *Alternative) mayFailPartway() bool {
+	if len(a.terms) != 1 {
+		return true
+	}
+	switch a.terms[0].option {
+	case TERM_LITERAL, TERM_GOR:
+		return false
+	}
+	return true
 }
 
 // A term is either a production name, string literal, lexer function, or a
@@ -429,7 +503,21 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 		if needPos {
 			p.out.WriteString(fmt.Sprintf("a%vPos = %v\n", aCount, i+1))
 		}
+		// An alternative that fails after matching part of the input is
+		// undone before the next one is tried, so that every alternative
+		// starts where the first did. The last needs no undoing here: when
+		// it fails, the expression does, and whatever tried the expression
+		// undoes it.
+		undo := i < len(exp.alternatives)-1 && v.mayFailPartway()
+		if undo {
+			p.out.WriteString("p = p.predict()\n")
+		}
+		vStart := vCount
 		vCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
+		if undo {
+			alt := &Expression{alternatives: []*Alternative{v}}
+			p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v} else {\np = p.accept()\n}\n", p.zeroVars(alt, vStart, rep, hasAction)))
+		}
 		if i < len(exp.alternatives)-1 {
 			p.out.WriteString("if err != nil { \n")
 		} else if needPos {
@@ -463,9 +551,9 @@ func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, re
 func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAction bool) int {
 	switch term.option {
 	case TERM_NAME:
-		// states get their own error scope; recorded errors are kept when
-		// the scope pops (the old merge behavior) while clear/coalesce/depth
-		// operate on the innermost open scope only
+		// states get their own error scope, which is merged into the
+		// parent's when it pops (see parserErrorStack), while
+		// clear/coalesce/depth operate on the innermost open scope only
 		p.out.WriteString("p.errorStack.push()\n")
 
 		if _, ok := p.typeMap[term.name]; ok {
@@ -522,27 +610,29 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 	return vCount
 }
 
-// Subexpressions, which are visited in groups, must create a new parser, which
-// then attempts to evaluate the expression. If it fails, the parent parser can
-// discard the result (backtracking), or accept it by merging the parser states
-// together.
+// Subexpressions, which are visited in groups, are speculative attempts: the
+// parser saves its state (predict), tries the expression, and then either
+// restores the state if the expression fails (backtrack) or keeps the result
+// (accept). A failed attempt's variables are reset too, and each repetition
+// starts with its temporaries reset, so that an action sees only what matched.
 func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasAction bool) int {
+	vStart := vCount
 	switch gor.option {
 	case GOR_GROUP:
 		p.out.WriteString("// group\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString("if err != nil { p = p.backtrack() } else { p = p.accept() }\n")
+		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v} else {\np = p.accept()\n}\n", p.zeroVars(gor.expression, vStart, rep, hasAction)))
 	case GOR_OPTION:
 		p.out.WriteString("// option\n")
 		p.out.WriteString("p = p.predict()\n")
 		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString("if err != nil { p = p.backtrack(); err = nil } else { p = p.accept() }\n")
+		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\nerr = nil\n%v} else {\np = p.accept()\n}\n", p.zeroVars(gor.expression, vStart, rep, hasAction)))
 	case GOR_REPETITION:
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
 		p.out.WriteString("p = p.predict()\n")
-		vStart := vCount
+		p.out.WriteString(p.zeroVars(gor.expression, vStart, true, hasAction))
 		vCount = p.visitExpression(vCount, aCount, gor.expression, true, hasAction)
 		var acceptAppends string
 		if hasAction {
@@ -565,6 +655,12 @@ var errorRecovery = `
 // only.  This avoids allocating a fresh error stack for every speculative
 // attempt, which both burns CPU and creates a new runtime memory-profile
 // bucket for every unique recursion stack in long-running processes.
+//
+// coalesce reports only the errors at the furthest position in a scope, so
+// a scope keeps only those: an error behind them isn't recorded, one past
+// them replaces them, and a scope that pops is merged into its parent the
+// same way. Every scope's errors are therefore at one position, and the
+// stack stays small however many speculative attempts fail.
 type parserErrorStack struct {
 	stack  []parseError
 	scopes []int
@@ -581,9 +677,23 @@ func (e *parserErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
-// pop closes the innermost scope; recorded errors remain.
+// pop closes the innermost scope, merging it into the parent: only the
+// errors at the furthest position survive. The closing scope's errors are
+// dropped when they are behind the parent's own, they replace the parent's
+// errors when they are past them, and a tie keeps both.
 func (e *parserErrorStack) pop() {
+	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
+	outer, n := e.scopeBase(), len(e.stack)
+	if inner == n || inner == outer {
+		return
+	}
+	switch op, ip := e.stack[inner-1].pos, e.stack[n-1].pos; {
+	case ip < op:
+		e.stack = e.stack[:inner]
+	case ip > op:
+		e.stack = append(e.stack[:outer], e.stack[inner:]...)
+	}
 }
 
 func (e *parserErrorStack) scopeBase() int {
@@ -598,7 +708,14 @@ func (e *parserErrorStack) clear() {
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
-	e.stack = append(e.stack, parseError{ err: err, pos: pos })
+	if base, n := e.scopeBase(), len(e.stack); n > base {
+		if top := e.stack[n-1].pos; pos < top {
+			return
+		} else if pos > top {
+			e.stack = e.stack[:base]
+		}
+	}
+	e.stack = append(e.stack, parseError{err: err, pos: pos})
 }
 
 func (e *parserErrorStack) coalesce() error {
@@ -611,9 +728,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth
+			// deduplicate errors at a given depth: by identity, which
+			// catches the interned literal errors without rendering a
+			// message, and then by message
 			for _, w := range es {
-				if w.Error() == v.err.Error() {
+				if identicalErrs(w, v.err) || w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
@@ -634,6 +753,15 @@ COALESCE_OUTER:
 	return &joinedError{es: append([]error(nil), es...)}
 }
 
+// identicalErrs reports whether a and b are the same error value. Comparing
+// two interface values panics when both hold the same uncomparable dynamic
+// type, which user-supplied errors may; those are treated as distinct so the
+// caller falls through to comparing messages.
+func identicalErrs(a, b error) (identical bool) {
+	defer func() { _ = recover() }()
+	return a == b
+}
+
 // joinedError is a multi-error whose message is rendered lazily and
 // memoized.  It prints the error stack in reverse order.
 type joinedError struct {
@@ -644,7 +772,7 @@ type joinedError struct {
 func (j *joinedError) Error() string {
 	if j.msg == "" {
 		var sb strings.Builder
-		for i := len(j.es)-1; i >= 0; i-- {
+		for i := len(j.es) - 1; i >= 0; i-- {
 			sb.WriteString(j.es[i].Error())
 			sb.WriteByte('\n')
 		}
@@ -710,10 +838,13 @@ type _PREFIX_Parser struct {
 	errorStack  *parserErrorStack
 
 	posStack []int
+
+	// Data, when it implements _PREFIX_Savepointer
+	savepoints _PREFIX_Savepointer
 }
 
 func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
-	return &_PREFIX_Parser{
+	p := &_PREFIX_Parser{
 		input:       input,
 		lineOffsets: _PREFIX_GenerateLineOffsets(input),
 		Data: data,
@@ -723,6 +854,10 @@ func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
 		},
 		posStack: make([]int, 0, 64),
 	}
+	if sp, ok := interface{}(data).(_PREFIX_Savepointer); ok && data != nil {
+		p.savepoints = sp
+	}
+	return p
 }
 
 func _PREFIX_GenerateLineOffsets(input string) []int {
@@ -757,27 +892,6 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 	}
 	return "", fmt.Errorf("expected %%v", want)
 }
-
-// predict/backtrack/accept save and restore the parser position around a
-// speculative parse attempt.  Only pos is mutable speculative state (input,
-// lineOffsets, Data, and errorStack are shared), so a position stack on the
-// receiver replaces the previous scheme of allocating a full parser copy per
-// attempt.
-func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
-	p.posStack = append(p.posStack, p.pos)
-	return p
-}
-
-func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
-	p.pos = p.posStack[len(p.posStack)-1]
-	p.posStack = p.posStack[:len(p.posStack)-1]
-	return p
-}
-
-func (p *_PREFIX_Parser) accept() *_PREFIX_Parser {
-	p.posStack = p.posStack[:len(p.posStack)-1]
-	return p
-}
 `
 
 var headerTokenMode = `
@@ -804,10 +918,13 @@ type _PREFIX_Parser struct {
 	errorStack  *parserErrorStack
 
 	posStack []int
+
+	// Data, when it implements _PREFIX_Savepointer
+	savepoints _PREFIX_Savepointer
 }
 
 func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
-	return &_PREFIX_Parser{
+	p := &_PREFIX_Parser{
 		input:       input,
 		Data: data,
 		errorStack: &parserErrorStack{
@@ -816,6 +933,10 @@ func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
 		},
 		posStack: make([]int, 0, 64),
 	}
+	if sp, ok := interface{}(data).(_PREFIX_Savepointer); ok && data != nil {
+		p.savepoints = sp
+	}
+	return p
 }
 
 // literal runs on every token match attempt during speculative parsing, so
@@ -832,24 +953,55 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 	}
 	return "", fmt.Errorf("expected %%v", want)
 }
+`
 
-// predict/backtrack/accept save and restore the parser position around a
-// speculative parse attempt.  Only pos is mutable speculative state (input,
-// Data, and errorStack are shared), so a position stack on the receiver
-// replaces the previous scheme of allocating a full parser copy per attempt.
+// backtracking is the code that undoes a failed speculative attempt, the same
+// in string and token mode.
+var backtracking = `
+
+// _PREFIX_Savepointer is implemented by a _PREFIX_Data whose actions, lexer
+// functions, or error functions change state that backtracking must undo.
+// Backtracking restores the parser's position, but an action runs as soon as
+// its production matches, even in an attempt that fails afterwards, and a
+// lexer function runs on every attempt. When _PREFIX_Data implements it, the
+// parser calls savepoint as each speculative attempt begins, then rollback if
+// the attempt fails or release if it succeeds. The calls nest as the attempts
+// do: rollback restores the state saved by the latest savepoint not yet rolled
+// back or released, and release forgets that savepoint, keeping the changes
+// made since.
+type _PREFIX_Savepointer interface {
+	savepoint()
+	rollback()
+	release()
+}
+
+// predict/backtrack/accept save and restore the parser's state around a
+// speculative parse attempt: its position, and Data's state when Data is a
+// _PREFIX_Savepointer. input, lineOffsets, and errorStack are shared, so a
+// position stack on the receiver replaces the previous scheme of allocating a
+// full parser copy per attempt.
 func (p *_PREFIX_Parser) predict() *_PREFIX_Parser {
 	p.posStack = append(p.posStack, p.pos)
+	if p.savepoints != nil {
+		p.savepoints.savepoint()
+	}
 	return p
 }
 
 func (p *_PREFIX_Parser) backtrack() *_PREFIX_Parser {
 	p.pos = p.posStack[len(p.posStack)-1]
 	p.posStack = p.posStack[:len(p.posStack)-1]
+	if p.savepoints != nil {
+		p.savepoints.rollback()
+	}
 	return p
 }
 
 func (p *_PREFIX_Parser) accept() *_PREFIX_Parser {
 	p.posStack = p.posStack[:len(p.posStack)-1]
+	if p.savepoints != nil {
+		p.savepoints.release()
+	}
 	return p
 }
 `

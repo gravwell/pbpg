@@ -59,7 +59,22 @@ Along with actions, the user can supply an `Error { ... }` code fragment, that w
 
 Whitespace *is trimmed* when parsing string literals. "foo" will match on both the input "foo bar" and "   foobar".
 
-Any grammatical element that requires backtracking (repetitions, groups, optional groups), are implemented by creating a new parser, rooted at the current input, and executing it. If the parse fails, backtracking is accomplished by simply discarding the parser. If the parse is successful, the parser state is merged. 
+Every element that can fail and be retried is a speculative attempt: each alternative of a choice, each group and option, and each iteration of a repetition. The parser saves its position before an attempt and restores it when the attempt fails, so every alternative starts where the first did, as in a PEG. It also resets the variables the attempt set to their zero values, so an action sees the terms of a failed attempt as unmatched. In `[ Label ":" ] Name`, for example, `v1` is empty unless the option matched. Each iteration of a repetition starts with its variables reset the same way, so the slices an action gets hold zero values for the terms an iteration didn't match.
+
+The parser can't undo what actions, lexer functions, and error functions do to the data object, though. An action runs as soon as its production matches, even inside an attempt that fails afterwards, so an action that records something in the data object, such as a declared name, records it for attempts the parser then discards. A lexer function that counts brackets has the same problem. When the data object implements the generated `<prefix>Savepointer` interface, the parser calls it around every attempt:
+
+```go
+// savepoint saves the state to restore if the attempt that's starting fails.
+func (p *<prefix>Data) savepoint()
+
+// rollback restores the state saved by the latest open savepoint, and closes it.
+func (p *<prefix>Data) rollback()
+
+// release closes the latest open savepoint, keeping the changes made since.
+func (p *<prefix>Data) release()
+```
+
+Savepoints nest as attempts do, so a stack of saved state is the usual implementation; `testdata/backtrack.b` has an example. State that should survive a failed parse, such as completions offered to an editor, should be left out of what rollback restores, since the attempts that fail in a failed parse are rolled back too.
 
 pbpg generates a backtracking recursive descent parser. This means that there are no guarantees to the runtime of the parser, even if the supplied grammar is LL(k). pbpg parsers can take exponential time in the worst case, so care should be taken when expressing a grammar. 
 
