@@ -80,6 +80,7 @@ func main() {
 		data.out.WriteString(fmt.Sprintf(h, "error", "err", "return err", "return err"))
 	}
 
+	data.out.WriteString(strings.ReplaceAll(backtracking, PREFIX, *fPrefix))
 	data.out.WriteString(strings.ReplaceAll(errorRecovery, PREFIX, *fPrefix))
 	data.out.WriteString(data.literalErrorMap())
 
