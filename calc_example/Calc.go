@@ -550,6 +550,12 @@ func (p *CalcParser) accept() *CalcParser {
 // only.  This avoids allocating a fresh error stack for every speculative
 // attempt, which both burns CPU and creates a new runtime memory-profile
 // bucket for every unique recursion stack in long-running processes.
+//
+// coalesce reports only the errors at the furthest position in a scope, so
+// a scope keeps only those: an error behind them isn't recorded, one past
+// them replaces them, and a scope that pops is merged into its parent the
+// same way. Every scope's errors are therefore at one position, and the
+// stack stays small however many speculative attempts fail.
 type parserErrorStack struct {
 	stack  []parseError
 	scopes []int
@@ -566,9 +572,21 @@ func (e *parserErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
-// pop closes the innermost scope; recorded errors remain.
+// pop closes the innermost scope; recorded errors remain, if they are at or
+// past the parent scope's own.
 func (e *parserErrorStack) pop() {
+	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
+	outer, n := e.scopeBase(), len(e.stack)
+	if inner == n || inner == outer {
+		return
+	}
+	switch op, ip := e.stack[inner-1].pos, e.stack[n-1].pos; {
+	case ip < op:
+		e.stack = e.stack[:inner]
+	case ip > op:
+		e.stack = append(e.stack[:outer], e.stack[inner:]...)
+	}
 }
 
 func (e *parserErrorStack) scopeBase() int {
@@ -583,6 +601,13 @@ func (e *parserErrorStack) clear() {
 }
 
 func (e *parserErrorStack) error(err error, pos int) {
+	if base, n := e.scopeBase(), len(e.stack); n > base {
+		if top := e.stack[n-1].pos; pos < top {
+			return
+		} else if pos > top {
+			e.stack = e.stack[:base]
+		}
+	}
 	e.stack = append(e.stack, parseError{err: err, pos: pos})
 }
 
@@ -596,9 +621,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth
+			// deduplicate errors at a given depth: by identity, which
+			// catches the interned literal errors without rendering a
+			// message, and then by message
 			for _, w := range es {
-				if w.Error() == v.err.Error() {
+				if w == v.err || w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
