@@ -35,14 +35,14 @@ Types       = "type" Name lex(type) .						Action {
 											if _, ok := p.typeMap[v2]; ok {
 												log.Fatalf("type %v redeclared", v2)
 											}
-											p.typeMap[v2] = v3
+											setEntry(p, p.typeMap, v2, v3)
 										}
 Line        = Comment | Production .
 Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .		Action { 
 											if p.stateMap[v1] != nil {
 												log.Fatalf("%v redeclared", v1)
 											}
-											p.stateMap[v1] = v3
+											setEntry(p, p.stateMap, v1, v3)
 											p.orderedStates = append(p.orderedStates, v1)
 											
 											p.emitState(v1, v3, v5, v6)

@@ -8,6 +8,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strconv"
@@ -29,13 +30,79 @@ type pbpgData struct {
 	typeMap       map[string]string
 	stateMap      map[string]*Expression // list of productions
 	orderedStates []string               // list of productions in source order
-	out           strings.Builder        // output buffer, which is combined with the boiler plate code and formatted on success
+	out           bytes.Buffer           // output buffer, which is combined with the boiler plate code and formatted on success
 
 	statesUsed map[string]bool // list of states referenced in terms. Used for grammar validation.
 
 	literalsUsed map[string]bool // list of literals referenced in terms. Used to emit the interned literal error map.
 
 	entryPoint string // The name of the first encountered production.
+
+	// savepoints and undo make pbpgData a pbpgSavepointer, so an attempt
+	// that fails takes back the types, productions, and output its actions
+	// added. undo holds a function that reverts each map entry set while an
+	// attempt is open, oldest first.
+	savepoints []pbpgSavepoint
+	undo       []func()
+
+	// saveCount numbers the snapshots attemptSaves emits within the state
+	// function being emitted; emitState resets it so a production's output
+	// doesn't depend on how the productions before it parsed.
+	saveCount int
+}
+
+// pbpgSavepoint is the state to restore if the attempt that saved it fails.
+type pbpgSavepoint struct {
+	out, orderedStates, undo int
+	entryPoint               string
+}
+
+var _ pbpgSavepointer = (*pbpgData)(nil)
+
+func (p *pbpgData) savepoint() {
+	p.savepoints = append(p.savepoints, pbpgSavepoint{
+		out:           p.out.Len(),
+		orderedStates: len(p.orderedStates),
+		undo:          len(p.undo),
+		entryPoint:    p.entryPoint,
+	})
+}
+
+func (p *pbpgData) rollback() {
+	s := p.savepoints[len(p.savepoints)-1]
+	p.savepoints = p.savepoints[:len(p.savepoints)-1]
+	for i := len(p.undo) - 1; i >= s.undo; i-- {
+		p.undo[i]()
+	}
+	p.undo = p.undo[:s.undo]
+	p.out.Truncate(s.out)
+	p.orderedStates = p.orderedStates[:s.orderedStates]
+	p.entryPoint = s.entryPoint
+}
+
+func (p *pbpgData) release() {
+	p.savepoints = p.savepoints[:len(p.savepoints)-1]
+	if len(p.savepoints) == 0 {
+		p.undo = p.undo[:0]
+	}
+}
+
+// setEntry sets m[k] to v, and while an attempt is open, records how to take
+// it back. A write that changes nothing is skipped rather than logged: nearly
+// every statesUsed and literalsUsed write re-sets an entry that's already
+// true, and logging those would grow the undo log with every term parsed.
+func setEntry[V comparable](p *pbpgData, m map[string]V, k string, v V) {
+	if old, ok := m[k]; ok {
+		if old == v {
+			return
+		}
+		if len(p.savepoints) > 0 {
+			p.undo = append(p.undo, func() { m[k] = old })
+		}
+	} else if len(p.savepoints) > 0 {
+		p.undo = append(p.undo, func() { delete(m, k) })
+	}
+	m[k] = v
 }
 
 type Variable struct {
@@ -196,110 +263,13 @@ func (e *Expression) numAlternativeGroups() int {
 	return r
 }
 
-func (p *pbpgData) declarators(exp *Expression) string {
-	vars := exp.variables()
-	c := 1
-	var r string
-
-	ag := exp.numAlternativeGroups()
-	for i := 1; i <= ag; i++ {
-		r += fmt.Sprintf("var a%vPos int\n", i)
-	}
-
-	for _, v := range vars {
-		switch v.T {
-		case TERM_NAME:
-			if ftype, ok := p.typeMap[v.Value]; ok {
-				if v.Repetition {
-					r += fmt.Sprintf("var v%vtemp %v\n", c, ftype)
-					r += fmt.Sprintf("var v%v []%v\n", c, ftype)
-				} else {
-					r += fmt.Sprintf("var v%v %v\n", c, ftype)
-				}
-				c++
-			}
-		case TERM_LITERAL, TERM_LEX:
-			if v.Repetition {
-				r += fmt.Sprintf("var v%vtemp string\n", c)
-				r += fmt.Sprintf("var v%v []string\n", c)
-			} else {
-				r += fmt.Sprintf("var v%v string\n", c)
-			}
-			c++
-		}
-	}
-	return r
-}
-
-func (p *pbpgData) positionalArgs(exp *Expression) string {
-	vars := exp.variables()
-	c := 1
-	var r string
-
-	ag := exp.numAlternativeGroups()
-	for i := 1; i <= ag; i++ {
-		r += fmt.Sprintf("a%vPos,", i)
-	}
-
-	for _, v := range vars {
-		switch v.T {
-		case TERM_NAME:
-			if _, ok := p.typeMap[v.Value]; ok {
-				r += fmt.Sprintf("v%v,", c)
-				c++
-			}
-		case TERM_LITERAL, TERM_LEX:
-			r += fmt.Sprintf("v%v,", c)
-			c++
-		}
-	}
-	return strings.TrimSuffix(r, ",")
-}
-
-func (p *pbpgData) functionSignature(exp *Expression) string {
-	vars := exp.variables()
-	c := 1
-	var r string
-
-	ag := exp.numAlternativeGroups()
-	for i := 1; i <= ag; i++ {
-		r += fmt.Sprintf("a%vPos int,", i)
-	}
-
-	for _, v := range vars {
-		switch v.T {
-		case TERM_NAME:
-			if ftype, ok := p.typeMap[v.Value]; ok {
-				if v.Repetition {
-					r += fmt.Sprintf("v%v []%v,", c, ftype)
-				} else {
-					r += fmt.Sprintf("v%v %v,", c, ftype)
-				}
-				c++
-			}
-		case TERM_LITERAL, TERM_LEX:
-			if v.Repetition {
-				r += fmt.Sprintf("v%v []string,", c)
-			} else {
-				r += fmt.Sprintf("v%v string,", c)
-			}
-			c++
-		}
-	}
-	return strings.TrimSuffix(r, ",")
-}
-
-// zeroVars returns the statements that reset the variables of exp, numbered
-// from first, to their zero values, so that an action sees the terms of a
-// failed attempt as unmatched rather than as what they held when it failed.
-// In a repetition they're the temporaries of the current iteration, and
-// otherwise a repetition in exp has a slice, which is reset to nil. Without
-// an action or error block there are no variables to reset.
-func (p *pbpgData) zeroVars(exp *Expression, first int, rep bool, hasAction bool) string {
-	if !hasAction {
-		return ""
-	}
-	var r strings.Builder
+// typedVariables calls f for each variable of exp that the generated code
+// binds a value to — every term except a production without a type — with its
+// number, counted from first, and its Go type. Everything that refers to
+// variables by number (declarators, positionalArgs, functionSignature,
+// zeroVars, attemptSaves, and the repetition appends) numbers them through
+// this one walk, so they can't drift apart.
+func (p *pbpgData) typedVariables(exp *Expression, first int, f func(c int, v *Variable, ftype string)) {
 	c := first
 	for _, v := range exp.variables() {
 		ftype := "string"
@@ -309,6 +279,77 @@ func (p *pbpgData) zeroVars(exp *Expression, first int, rep bool, hasAction bool
 				continue
 			}
 		}
+		f(c, v, ftype)
+		c++
+	}
+}
+
+func (p *pbpgData) declarators(exp *Expression) string {
+	var r string
+
+	ag := exp.numAlternativeGroups()
+	for i := 1; i <= ag; i++ {
+		r += fmt.Sprintf("var a%vPos int\n", i)
+	}
+
+	p.typedVariables(exp, 1, func(c int, v *Variable, ftype string) {
+		if v.Repetition {
+			r += fmt.Sprintf("var v%vtemp %v\n", c, ftype)
+			r += fmt.Sprintf("var v%v []%v\n", c, ftype)
+		} else {
+			r += fmt.Sprintf("var v%v %v\n", c, ftype)
+		}
+	})
+	return r
+}
+
+func (p *pbpgData) positionalArgs(exp *Expression) string {
+	var r string
+
+	ag := exp.numAlternativeGroups()
+	for i := 1; i <= ag; i++ {
+		r += fmt.Sprintf("a%vPos,", i)
+	}
+
+	p.typedVariables(exp, 1, func(c int, v *Variable, ftype string) {
+		r += fmt.Sprintf("v%v,", c)
+	})
+	return strings.TrimSuffix(r, ",")
+}
+
+func (p *pbpgData) functionSignature(exp *Expression) string {
+	var r string
+
+	ag := exp.numAlternativeGroups()
+	for i := 1; i <= ag; i++ {
+		r += fmt.Sprintf("a%vPos int,", i)
+	}
+
+	p.typedVariables(exp, 1, func(c int, v *Variable, ftype string) {
+		if v.Repetition {
+			r += fmt.Sprintf("v%v []%v,", c, ftype)
+		} else {
+			r += fmt.Sprintf("v%v %v,", c, ftype)
+		}
+	})
+	return strings.TrimSuffix(r, ",")
+}
+
+// zeroVars returns the statements that reset the variables of exp, numbered
+// from first, to their zero values, so that an action sees the terms of a
+// failed attempt as unmatched rather than as what they held when it failed.
+// In a repetition they're the temporaries of the current iteration, and
+// otherwise a repetition in exp has a slice, which is reset to nil. What a
+// failed attempt added to state that predates it — a nested repetition's
+// slice inside an enclosing repetition, and the alternative positions it set
+// — is restored by attemptSaves rather than zeroed here. Without an action or
+// error block there are no variables to reset.
+func (p *pbpgData) zeroVars(exp *Expression, first int, rep bool, hasAction bool) string {
+	if !hasAction {
+		return ""
+	}
+	var r strings.Builder
+	p.typedVariables(exp, first, func(c int, v *Variable, ftype string) {
 		switch {
 		case rep:
 			r.WriteString(fmt.Sprintf("v%vtemp = %v\n", c, zeroValue(ftype)))
@@ -317,13 +358,52 @@ func (p *pbpgData) zeroVars(exp *Expression, first int, rep bool, hasAction bool
 		default:
 			r.WriteString(fmt.Sprintf("v%v = %v\n", c, zeroValue(ftype)))
 		}
-		c++
-	}
+	})
 	return r.String()
 }
 
+// attemptSaves returns paired statements for the speculative attempt over
+// exp, whose typed variables are numbered from vFirst and whose alternative
+// groups follow aCount: saves runs as the attempt begins, and resets runs
+// when it backtracks. An attempt can leave more than its own scalars behind —
+// a nested repetition appends to its slice as it iterates, and an alternative
+// group records its position as soon as it's tried. Inside a repetition
+// (rep), what earlier, accepted iterations added must survive the reset, so
+// saves snapshots the slice lengths and positions for resets to restore;
+// elsewhere nothing came before, so resets clears the positions directly and
+// zeroVars' nil reset covers the slices. The attempt's own scalars are
+// zeroVars' job.
+func (p *pbpgData) attemptSaves(exp *Expression, vFirst, aCount int, rep bool, hasAction bool) (string, string) {
+	if !hasAction {
+		return "", ""
+	}
+	var saves, resets strings.Builder
+	p.saveCount++
+	id := p.saveCount
+	if rep {
+		p.typedVariables(exp, vFirst, func(c int, v *Variable, ftype string) {
+			if !v.Repetition {
+				return
+			}
+			saves.WriteString(fmt.Sprintf("s%vv%v := len(v%v)\n", id, c, c))
+			resets.WriteString(fmt.Sprintf("v%v = v%v[:s%vv%v]\n", c, c, id, c))
+		})
+	}
+	for i := aCount + 1; i <= aCount+exp.numAlternativeGroups(); i++ {
+		if rep {
+			saves.WriteString(fmt.Sprintf("s%va%v := a%vPos\n", id, i, i))
+			resets.WriteString(fmt.Sprintf("a%vPos = s%va%v\n", i, id, i))
+		} else {
+			resets.WriteString(fmt.Sprintf("a%vPos = 0\n", i))
+		}
+	}
+	return saves.String(), resets.String()
+}
+
 // zeroValue returns an expression for the zero value of the Go type ftype,
-// which is the rest of its type declaration's line.
+// which is the rest of its type declaration's line. *new(T) is the zero value
+// of any type; strings, bools, and numbers get their literal spelling only to
+// keep the generated code readable.
 func zeroValue(ftype string) string {
 	ftype = strings.TrimSpace(ftype)
 	switch {
@@ -333,10 +413,6 @@ func zeroValue(ftype string) string {
 		return "false"
 	case basicNumeric[ftype]:
 		return "0"
-	case strings.HasPrefix(ftype, "*"), strings.HasPrefix(ftype, "[]"),
-		strings.HasPrefix(ftype, "map["), strings.HasPrefix(ftype, "func("),
-		strings.HasPrefix(ftype, "chan "), ftype == "error":
-		return "nil"
 	}
 	return fmt.Sprintf("*new(%v)", ftype)
 }
@@ -451,6 +527,7 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 		p.out.WriteString(fmt.Sprintf("log.Println(\"state%v\")\n", name))
 	}
 
+	p.saveCount = 0
 	p.visitExpression(1, 0, exp, false, hasActionError)
 
 	pa := p.positionalArgs(exp)
@@ -492,16 +569,21 @@ func (p *pbpgData) emitState(name string, exp *Expression, a, e string) {
 	}
 }
 
-func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep bool, hasAction bool) int {
+func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep bool, hasAction bool) (int, int) {
+	// pos is this expression's own alternative group number; aCount keeps
+	// counting through the groups nested in the alternatives, so sibling
+	// groups get distinct numbers, matching numAlternativeGroups.
 	var needPos bool
+	var pos int
 	if len(exp.alternatives) > 1 && hasAction {
 		aCount++
+		pos = aCount
 		needPos = true
 	}
 
 	for i, v := range exp.alternatives {
 		if needPos {
-			p.out.WriteString(fmt.Sprintf("a%vPos = %v\n", aCount, i+1))
+			p.out.WriteString(fmt.Sprintf("a%vPos = %v\n", pos, i+1))
 		}
 		// An alternative that fails after matching part of the input is
 		// undone before the next one is tried, so that every alternative
@@ -509,20 +591,24 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 		// it fails, the expression does, and whatever tried the expression
 		// undoes it.
 		undo := i < len(exp.alternatives)-1 && v.mayFailPartway()
+		alt := &Expression{alternatives: []*Alternative{v}}
+		var resets string
 		if undo {
+			var saves string
+			saves, resets = p.attemptSaves(alt, vCount, aCount, rep, hasAction)
+			p.out.WriteString(saves)
 			p.out.WriteString("p = p.predict()\n")
 		}
 		vStart := vCount
-		vCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
+		vCount, aCount = p.visitAlternative(vCount, aCount, v, rep, hasAction)
 		if undo {
-			alt := &Expression{alternatives: []*Alternative{v}}
-			p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v} else {\np = p.accept()\n}\n", p.zeroVars(alt, vStart, rep, hasAction)))
+			p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v%v} else {\np = p.accept()\n}\n", resets, p.zeroVars(alt, vStart, rep, hasAction)))
 		}
 		if i < len(exp.alternatives)-1 {
 			p.out.WriteString("if err != nil { \n")
 		} else if needPos {
 			p.out.WriteString("if err != nil { \n")
-			p.out.WriteString(fmt.Sprintf("a%vPos = -1\n", aCount))
+			p.out.WriteString(fmt.Sprintf("a%vPos = -1\n", pos))
 		}
 	}
 	for i := range exp.alternatives {
@@ -530,12 +616,12 @@ func (p *pbpgData) visitExpression(vCount int, aCount int, exp *Expression, rep 
 			p.out.WriteString("}\n")
 		}
 	}
-	return vCount
+	return vCount, aCount
 }
 
-func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, rep bool, hasAction bool) int {
+func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, rep bool, hasAction bool) (int, int) {
 	for i, v := range alt.terms {
-		vCount = p.visitTerm(vCount, aCount, v, rep, hasAction)
+		vCount, aCount = p.visitTerm(vCount, aCount, v, rep, hasAction)
 		if i < len(alt.terms)-1 {
 			p.out.WriteString("if err == nil {\n")
 		}
@@ -545,10 +631,10 @@ func (p *pbpgData) visitAlternative(vCount int, aCount int, alt *Alternative, re
 			p.out.WriteString("}\n")
 		}
 	}
-	return vCount
+	return vCount, aCount
 }
 
-func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAction bool) int {
+func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAction bool) (int, int) {
 	switch term.option {
 	case TERM_NAME:
 		// states get their own error scope, which is merged into the
@@ -573,14 +659,14 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		if p.statesUsed == nil {
 			p.statesUsed = make(map[string]bool)
 		}
-		p.statesUsed[term.name] = true
+		setEntry(p, p.statesUsed, term.name, true)
 
 		p.out.WriteString("p.errorStack.pop()\n")
 	case TERM_LITERAL:
 		if p.literalsUsed == nil {
 			p.literalsUsed = make(map[string]bool)
 		}
-		p.literalsUsed[term.literal] = true
+		setEntry(p, p.literalsUsed, term.literal, true)
 		if hasAction {
 			if rep {
 				p.out.WriteString(fmt.Sprintf("v%vtemp, err = p.literal(%v)\n", vCount, strconv.Quote(term.literal)))
@@ -593,7 +679,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		p.out.WriteString("if err != nil { p.errorStack.error(err, p.pos) }\n")
 		vCount++
 	case TERM_GOR:
-		vCount = p.visitGOR(vCount, aCount, term.gor, rep, hasAction)
+		vCount, aCount = p.visitGOR(vCount, aCount, term.gor, rep, hasAction)
 	case TERM_LEX:
 		if hasAction {
 			if rep {
@@ -607,43 +693,59 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 		vCount++
 		p.out.WriteString("if err != nil { p.errorStack.error(err, p.pos) }\n")
 	}
-	return vCount
+	return vCount, aCount
 }
 
 // Subexpressions, which are visited in groups, are speculative attempts: the
 // parser saves its state (predict), tries the expression, and then either
 // restores the state if the expression fails (backtrack) or keeps the result
-// (accept). A failed attempt's variables are reset too, and each repetition
-// starts with its temporaries reset, so that an action sees only what matched.
-func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasAction bool) int {
+// (accept). A failed attempt's variables are reset too (zeroVars and
+// attemptSaves), and each repetition starts with its temporaries reset, so
+// that an action sees only what matched.
+func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasAction bool) (int, int) {
 	vStart := vCount
 	switch gor.option {
 	case GOR_GROUP:
 		p.out.WriteString("// group\n")
+		saves, resets := p.attemptSaves(gor.expression, vStart, aCount, rep, hasAction)
+		p.out.WriteString(saves)
 		p.out.WriteString("p = p.predict()\n")
-		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v} else {\np = p.accept()\n}\n", p.zeroVars(gor.expression, vStart, rep, hasAction)))
+		vCount, aCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
+		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\n%v%v} else {\np = p.accept()\n}\n", resets, p.zeroVars(gor.expression, vStart, rep, hasAction)))
 	case GOR_OPTION:
 		p.out.WriteString("// option\n")
+		saves, resets := p.attemptSaves(gor.expression, vStart, aCount, rep, hasAction)
+		p.out.WriteString(saves)
 		p.out.WriteString("p = p.predict()\n")
-		vCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
-		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\nerr = nil\n%v} else {\np = p.accept()\n}\n", p.zeroVars(gor.expression, vStart, rep, hasAction)))
+		vCount, aCount = p.visitExpression(vCount, aCount, gor.expression, rep, hasAction)
+		p.out.WriteString(fmt.Sprintf("if err != nil {\np = p.backtrack()\nerr = nil\n%v%v} else {\np = p.accept()\n}\n", resets, p.zeroVars(gor.expression, vStart, rep, hasAction)))
 	case GOR_REPETITION:
+		// Each iteration is an attempt of its own: it sees the slices and
+		// positions earlier iterations accumulated, so a failed one restores
+		// them from the snapshots taken as it began.
 		p.out.WriteString("// repetition\n")
 		p.out.WriteString("for {\n")
+		saves, resets := p.attemptSaves(gor.expression, vStart, aCount, true, hasAction)
+		p.out.WriteString(saves)
 		p.out.WriteString("p = p.predict()\n")
 		p.out.WriteString(p.zeroVars(gor.expression, vStart, true, hasAction))
-		vCount = p.visitExpression(vCount, aCount, gor.expression, true, hasAction)
+		vCount, aCount = p.visitExpression(vCount, aCount, gor.expression, true, hasAction)
 		var acceptAppends string
 		if hasAction {
-			for i := vStart; i < vCount; i++ {
-				acceptAppends += fmt.Sprintf("v%v = append(v%v, v%vtemp)\n", i, i, i)
-			}
+			p.typedVariables(gor.expression, vStart, func(c int, v *Variable, ftype string) {
+				// a nested repetition's own loop appends to its slice,
+				// one entry per iteration of its own, not per iteration
+				// of this one
+				if v.Repetition {
+					return
+				}
+				acceptAppends += fmt.Sprintf("v%v = append(v%v, v%vtemp)\n", c, c, c)
+			})
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil; break } else { %v p = p.accept() }\n", acceptAppends))
+		p.out.WriteString(fmt.Sprintf("if err != nil { p = p.backtrack(); err = nil; %vbreak } else { %v p = p.accept() }\n", resets, acceptAppends))
 		p.out.WriteString("}\n")
 	}
-	return vCount
+	return vCount, aCount
 }
 
 var errorRecovery = `
@@ -728,11 +830,11 @@ COALESCE_OUTER:
 			bestDepth = v.pos
 			es = append(es[:0], v.err)
 		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth: by identity, which
-			// catches the interned literal errors without rendering a
-			// message, and then by message
+			// deduplicate errors at a given depth by message. Comparing the
+			// error values first measured slower, and it panics on two
+			// errors of the same uncomparable type.
 			for _, w := range es {
-				if identicalErrs(w, v.err) || w.Error() == v.err.Error() {
+				if w.Error() == v.err.Error() {
 					continue COALESCE_OUTER
 				}
 			}
@@ -751,15 +853,6 @@ COALESCE_OUTER:
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
 	return &joinedError{es: append([]error(nil), es...)}
-}
-
-// identicalErrs reports whether a and b are the same error value. Comparing
-// two interface values panics when both hold the same uncomparable dynamic
-// type, which user-supplied errors may; those are treated as distinct so the
-// caller falls through to comparing messages.
-func identicalErrs(a, b error) (identical bool) {
-	defer func() { _ = recover() }()
-	return a == b
 }
 
 // joinedError is a multi-error whose message is rendered lazily and
