@@ -153,18 +153,12 @@ func (p *CalcParser) stateFactor() (int, error) {
 	// group
 	p = p.predict()
 	v1, err = p.literal("(")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateExpression()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal(")")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err != nil {
@@ -213,14 +207,8 @@ func (p *CalcParser) stateAddOp() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("+")
 	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
-	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("-")
-		if err != nil {
-			p.errorStack.error(err, p.pos)
-		}
 		if err != nil {
 			a1Pos = -1
 		}
@@ -254,14 +242,8 @@ func (p *CalcParser) stateMultOp() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("*")
 	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
-	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("/")
-		if err != nil {
-			p.errorStack.error(err, p.pos)
-		}
 		if err != nil {
 			a1Pos = -1
 		}
@@ -285,9 +267,10 @@ func (p *CalcData) actionMultOp(pos int, a1Pos int, v1 string, v2 string) string
 
 }
 
-// Number = [ Neg ] Digit { Digit }
+// Number "a number" = [ Neg ] Digit { Digit }
 func (p *CalcParser) stateNumber() (int, error) {
 	var err error
+	entryPos := p.pos
 	var ret int
 	var v1 string
 	var v2 string
@@ -328,6 +311,10 @@ func (p *CalcParser) stateNumber() (int, error) {
 			}
 		}
 	}
+	if err != nil {
+		p.label("a number", entryPos)
+	}
+
 	if err == nil {
 		ret = p.Data.actionNumber(p.pos, v1, v2, v3)
 	}
@@ -348,9 +335,6 @@ func (p *CalcParser) stateNeg() (string, error) {
 	var ret string
 	var v1 string
 	v1, err = p.literal("-")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		ret = p.Data.actionNeg(p.pos, v1)
 	}
@@ -380,62 +364,32 @@ func (p *CalcParser) stateDigit() (string, error) {
 	a1Pos = 1
 	v1, err = p.literal("0")
 	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
-	if err != nil {
 		a1Pos = 2
 		v2, err = p.literal("1")
-		if err != nil {
-			p.errorStack.error(err, p.pos)
-		}
 		if err != nil {
 			a1Pos = 3
 			v3, err = p.literal("2")
 			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
-			if err != nil {
 				a1Pos = 4
 				v4, err = p.literal("3")
-				if err != nil {
-					p.errorStack.error(err, p.pos)
-				}
 				if err != nil {
 					a1Pos = 5
 					v5, err = p.literal("4")
 					if err != nil {
-						p.errorStack.error(err, p.pos)
-					}
-					if err != nil {
 						a1Pos = 6
 						v6, err = p.literal("5")
-						if err != nil {
-							p.errorStack.error(err, p.pos)
-						}
 						if err != nil {
 							a1Pos = 7
 							v7, err = p.literal("6")
 							if err != nil {
-								p.errorStack.error(err, p.pos)
-							}
-							if err != nil {
 								a1Pos = 8
 								v8, err = p.literal("7")
-								if err != nil {
-									p.errorStack.error(err, p.pos)
-								}
 								if err != nil {
 									a1Pos = 9
 									v9, err = p.literal("8")
 									if err != nil {
-										p.errorStack.error(err, p.pos)
-									}
-									if err != nil {
 										a1Pos = 10
 										v10, err = p.literal("9")
-										if err != nil {
-											p.errorStack.error(err, p.pos)
-										}
 										if err != nil {
 											a1Pos = -1
 										}
@@ -464,8 +418,15 @@ func ParseCalc(input string, data *CalcData) (int, error) {
 
 	ret, err := p.stateExpression()
 	if err == nil {
-		if strings.TrimSpace(p.input[p.pos:]) != "" {
+		if rest := strings.TrimLeftFunc(p.input[p.pos:], unicode.IsSpace); rest != "" {
+			// the top production matched but input is left over. The
+			// parser may have recorded nothing it expected, in which case
+			// coalesce is nil and the trailing input needs an error of its
+			// own, or the parse would be reported as a success.
 			err = p.errorStack.coalesce()
+			if err == nil {
+				err = fmt.Errorf("unexpected input at offset %v", len(p.input)-len(rest))
+			}
 			return ret, err
 		}
 	} else {
@@ -480,7 +441,7 @@ type CalcParser struct {
 	pos         int
 	lineOffsets []int
 	Data        *CalcData
-	errorStack  *parserErrorStack
+	errorStack  *CalcErrorStack
 
 	posStack []int
 
@@ -493,8 +454,8 @@ func newCalcParser(input string, data *CalcData) *CalcParser {
 		input:       input,
 		lineOffsets: CalcGenerateLineOffsets(input),
 		Data:        data,
-		errorStack: &parserErrorStack{
-			stack:  make([]parseError, 0, 64),
+		errorStack: &CalcErrorStack{
+			stack:  make([]CalcParseError, 0, 64),
 			scopes: make([]int, 0, 64),
 		},
 		posStack: make([]int, 0, 64),
@@ -519,8 +480,8 @@ func CalcGenerateLineOffsets(input string) []int {
 }
 
 // literal runs on every token match attempt during speculative parsing, so
-// it must not allocate; expected-token errors are interned in the generated
-// parserLiteralErrs map.
+// it must not allocate; it records what it expected as data, and returns the
+// same error every time.
 func (p *CalcParser) literal(want string) (string, error) {
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
@@ -532,10 +493,14 @@ func (p *CalcParser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	if err, ok := parserLiteralErrs[want]; ok {
-		return "", err
-	}
-	return "", fmt.Errorf("expected %v", want)
+	p.errorStack.expect(want, p.pos)
+	return "", CalcNoMatch
+}
+
+// blank reports whether the input from start to end is only whitespace,
+// which literals skip.
+func (p *CalcParser) blank(start, end int) bool {
+	return strings.TrimSpace(p.input[start:end]) == ""
 }
 
 // CalcSavepointer is implemented by a CalcData whose actions, lexer
@@ -584,7 +549,7 @@ func (p *CalcParser) accept() *CalcParser {
 	return p
 }
 
-// parserErrorStack accumulates parse errors in a single reusable backing
+// CalcErrorStack accumulates parse errors in a single reusable backing
 // array.  Speculative parse attempts open a scope (push) around each state
 // call and close it afterwards (pop); recorded errors are kept when a scope
 // pops, while clear, coalesce, and depth operate on the innermost open scope
@@ -592,111 +557,244 @@ func (p *CalcParser) accept() *CalcParser {
 // attempt, which both burns CPU and creates a new runtime memory-profile
 // bucket for every unique recursion stack in long-running processes.
 //
-// coalesce reports only the errors at the furthest position in a scope, so
-// a scope keeps only those: an error behind them isn't recorded, one past
-// them replaces them, and a scope that pops is merged into its parent the
-// same way. Every scope's errors are therefore at one position, and the
-// stack stays small however many speculative attempts fail.
-type parserErrorStack struct {
-	stack  []parseError
+// An error is either an expectation, something the parser looked for and
+// didn't find (a literal, a production's label, or what a lexer function
+// returned as a CalcExpected), or a real error: any other error from a
+// lexer function or an Error function. coalesce reports only the errors
+// that rank highest in a scope: those furthest into the input, and at one
+// position, real errors over expectations. So a scope keeps only those: an
+// error that ranks lower isn't recorded, one that ranks higher replaces
+// them, and a scope that pops is merged into its parent the same way. Every
+// scope's errors therefore rank alike, and the stack stays small however
+// many speculative attempts fail.
+type CalcErrorStack struct {
+	stack  []CalcParseError
 	scopes []int
 	es     []error // scratch buffer reused by coalesce
 }
 
-type parseError struct {
-	err error
-	pos int
+// CalcParseError is a real error, or when err is nil, an expectation of
+// expected.
+type CalcParseError struct {
+	err      error
+	expected string
+	literal  bool // expected is a literal, which messages quote
+	pos      int
 }
 
+// rank orders errors for reporting: errors further into the input rank
+// higher, and at one position, real errors rank higher than expectations.
+func (pe CalcParseError) rank() int {
+	if pe.err != nil {
+		return 2*pe.pos + 1
+	}
+	return 2 * pe.pos
+}
+
+// CalcExpected is the error a lexer function returns when the input doesn't
+// start with its token, naming the token, such as "a number". The parser
+// lists it with the other things it expected at the same position, as in
+// "expected ';' or a number", rather than reporting it as an error of its
+// own.
+type CalcExpected string
+
+func (e CalcExpected) Error() string {
+	return "expected " + string(e)
+}
+
+// CalcNoMatch is the error literal returns when the input doesn't start
+// with the literal. It only signals the failure: literal records what it
+// expected in the error stack.
+var CalcNoMatch = errors.New("literal not matched")
+
 // push opens an error scope around a speculative parse attempt.
-func (e *parserErrorStack) push() {
+func (e *CalcErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
 // pop closes the innermost scope, merging it into the parent: only the
-// errors at the furthest position survive. The closing scope's errors are
-// dropped when they are behind the parent's own, they replace the parent's
-// errors when they are past them, and a tie keeps both.
-func (e *parserErrorStack) pop() {
+// errors that rank highest survive. The closing scope's errors are dropped
+// when they rank below the parent's own, they replace the parent's errors
+// when they rank above them, and a tie keeps both.
+func (e *CalcErrorStack) pop() {
 	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
 	outer, n := e.scopeBase(), len(e.stack)
 	if inner == n || inner == outer {
 		return
 	}
-	switch op, ip := e.stack[inner-1].pos, e.stack[n-1].pos; {
-	case ip < op:
+	switch or, ir := e.stack[inner-1].rank(), e.stack[n-1].rank(); {
+	case ir < or:
 		e.stack = e.stack[:inner]
-	case ip > op:
+	case ir > or:
 		e.stack = append(e.stack[:outer], e.stack[inner:]...)
 	}
 }
 
-func (e *parserErrorStack) scopeBase() int {
+func (e *CalcErrorStack) scopeBase() int {
 	if n := len(e.scopes); n > 0 {
 		return e.scopes[n-1]
 	}
 	return 0
 }
 
-func (e *parserErrorStack) clear() {
+func (e *CalcErrorStack) clear() {
 	e.stack = e.stack[:e.scopeBase()]
 }
 
-func (e *parserErrorStack) error(err error, pos int) {
+// error records err at pos, as an expectation if it's a CalcExpected.
+func (e *CalcErrorStack) error(err error, pos int) {
+	if want, ok := err.(CalcExpected); ok {
+		e.add(CalcParseError{expected: string(want), pos: pos})
+	} else {
+		e.add(CalcParseError{err: err, pos: pos})
+	}
+}
+
+// expect records that the parser expected the literal lit at pos.
+func (e *CalcErrorStack) expect(lit string, pos int) {
+	e.add(CalcParseError{expected: lit, literal: true, pos: pos})
+}
+
+func (e *CalcErrorStack) add(pe CalcParseError) {
 	if base, n := e.scopeBase(), len(e.stack); n > base {
-		if top := e.stack[n-1].pos; pos < top {
+		if top := e.stack[n-1].rank(); pe.rank() < top {
 			return
-		} else if pos > top {
+		} else if pe.rank() > top {
 			e.stack = e.stack[:base]
 		}
 	}
-	e.stack = append(e.stack, parseError{err: err, pos: pos})
+	e.stack = append(e.stack, pe)
 }
 
-func (e *parserErrorStack) coalesce() error {
-	var bestDepth int
-	es := e.es[:0]
-
-COALESCE_OUTER:
-	for _, v := range e.stack[e.scopeBase():] {
-		if v.pos > bestDepth {
-			bestDepth = v.pos
-			es = append(es[:0], v.err)
-		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth by message. Comparing the
-			// error values first measured slower, and it panics on two
-			// errors of the same uncomparable type.
-			for _, w := range es {
-				if w.Error() == v.err.Error() {
-					continue COALESCE_OUTER
-				}
-			}
-			es = append(es, v.err)
+// label replaces the innermost scope's errors with an expectation of want,
+// a production's label, at the same position, if they're expectations. A
+// scope with no errors gets the expectation at start.
+func (e *CalcErrorStack) label(want string, start int) {
+	base, n := e.scopeBase(), len(e.stack)
+	pos := start
+	if n > base {
+		if e.stack[n-1].err != nil {
+			return
 		}
+		pos = e.stack[n-1].pos
+	}
+	e.stack = append(e.stack[:base], CalcParseError{expected: want, pos: pos})
+}
+
+// coalesce returns the innermost scope's errors as one error: nil if there
+// are none, an CalcExpectedError listing them if they're expectations, and
+// otherwise the real errors, each message once, one per line.
+func (e *CalcErrorStack) coalesce() error {
+	scope := e.stack[e.scopeBase():]
+	if len(scope) == 0 {
+		return nil
+	}
+	if scope[0].err == nil {
+		// a scope's errors rank alike, so they're all expectations. The
+		// error escapes into user code, so it can't be pooled, but it
+		// carries its own small buffer, which keeps the usual short list
+		// to one allocation.
+		ee := &CalcExpectedError{}
+		ee.want = append(ee.buf[:0], scope...)
+		return ee
+	}
+
+	es := e.es[:0]
+COALESCE_OUTER:
+	for _, v := range scope {
+		// deduplicate errors by message. Comparing the error values first
+		// measured slower, and it panics on two errors of the same
+		// uncomparable type.
+		for _, w := range es {
+			if w.Error() == v.err.Error() {
+				continue COALESCE_OUTER
+			}
+		}
+		es = append(es, v.err)
 	}
 	e.es = es[:0]
 
-	if len(es) == 0 {
-		return nil
-	} else if len(es) == 1 {
+	if len(es) == 1 {
 		return es[0]
 	}
 	// defer building the joined message until something reads it; failure
 	// handlers coalesce on every failed speculative attempt and almost
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
-	return &joinedError{es: append([]error(nil), es...)}
+	return &CalcJoinedError{es: append([]error(nil), es...)}
 }
 
-// joinedError is a multi-error whose message is rendered lazily and
+// CalcExpectedError is what the parser expected at a position, as one message:
+// "expected ';', '=' or an operator". Each thing expected is listed once,
+// the literals first, quoted, and then the rest, each group sorted. Like
+// CalcJoinedError's, the message is rendered when it's first read.
+type CalcExpectedError struct {
+	want []CalcParseError
+	// buf is where want is built, so that the usual short list of things
+	// expected costs no allocation beyond the error itself
+	buf [4]CalcParseError
+	msg string
+}
+
+func (e *CalcExpectedError) Error() string {
+	if e.msg == "" {
+		// an insertion sort, since the lists are short; ws[:lits] are the
+		// literals
+		var ws []string
+		lits := 0
+	WANT:
+		for _, v := range e.want {
+			w, lo, hi := v.expected, lits, len(ws)
+			if v.literal {
+				w, lo, hi = CalcQuoteLiteral(w), 0, lits
+			}
+			i := lo
+			for ; i < hi && ws[i] <= w; i++ {
+				if ws[i] == w {
+					continue WANT
+				}
+			}
+			ws = append(ws, "")
+			copy(ws[i+1:], ws[i:])
+			ws[i] = w
+			if v.literal {
+				lits++
+			}
+		}
+
+		var sb strings.Builder
+		sb.WriteString("expected ")
+		for i, w := range ws {
+			if i > 0 && i == len(ws)-1 {
+				sb.WriteString(" or ")
+			} else if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(w)
+		}
+		e.msg = sb.String()
+	}
+	return e.msg
+}
+
+// CalcQuoteLiteral quotes a literal for an error message, in single quotes
+// unless it has one.
+func CalcQuoteLiteral(s string) string {
+	if strings.Contains(s, "'") {
+		return fmt.Sprintf("%q", s)
+	}
+	return "'" + s + "'"
+}
+
+// CalcJoinedError is a multi-error whose message is rendered lazily and
 // memoized.  It prints the error stack in reverse order.
-type joinedError struct {
+type CalcJoinedError struct {
 	es  []error
 	msg string
 }
 
-func (j *joinedError) Error() string {
+func (j *CalcJoinedError) Error() string {
 	if j.msg == "" {
 		var sb strings.Builder
 		for i := len(j.es) - 1; i >= 0; i-- {
@@ -708,7 +806,7 @@ func (j *joinedError) Error() string {
 	return j.msg
 }
 
-func (e *parserErrorStack) depth() int {
+func (e *CalcErrorStack) depth() int {
 	var ret int
 	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
@@ -718,21 +816,15 @@ func (e *parserErrorStack) depth() int {
 	return ret
 }
 
-var parserLiteralErrs = map[string]error{
-	"(": errors.New("expected ("),
-	")": errors.New("expected )"),
-	"*": errors.New("expected *"),
-	"+": errors.New("expected +"),
-	"-": errors.New("expected -"),
-	"/": errors.New("expected /"),
-	"0": errors.New("expected 0"),
-	"1": errors.New("expected 1"),
-	"2": errors.New("expected 2"),
-	"3": errors.New("expected 3"),
-	"4": errors.New("expected 4"),
-	"5": errors.New("expected 5"),
-	"6": errors.New("expected 6"),
-	"7": errors.New("expected 7"),
-	"8": errors.New("expected 8"),
-	"9": errors.New("expected 9"),
+// label is called when a production with a label fails. If the production
+// failed before matching anything, that is, if its errors are at start,
+// where it started, or past only whitespace in string mode, then what it
+// expected is what its label names, and the label replaces the
+// expectations it recorded. Errors further on are left as they are, since
+// they say what was expected there, and so are real errors.
+func (p *CalcParser) label(want string, start int) {
+	if d := p.errorStack.depth(); d > start && !p.blank(start, d) {
+		return
+	}
+	p.errorStack.label(want, start)
 }

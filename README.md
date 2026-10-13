@@ -21,13 +21,14 @@ Program     	= { Comment } [ Header ] { Types } Line { Line } .
 Header      	= "{" Code "}" .
 Types	    	= "type" Name lex(type) .
 Line        	= Comment | Production .
-Production  	= Name "=" [ Expression ] "." [ Action ] [ Error ] .
+Production  	= Name [ Label ] "=" [ Expression ] "." [ Action ] [ Error ] .
+Label       	= Literal .
 Action      	= "Action" CodeBlock .
 Error       	= "Error" CodeBlock .
 CodeBlock   	= "{" Code "}" .						
 Expression  	= Alternative { "|" Alternative } .	
 Alternative 	= Term { Term } .		
-Term        	= Lex | Name | Literal | Group | Option | Repetition .
+Term "a term"	= Lex | Name | Literal | Group | Option | Repetition .
 Group       	= "(" Expression ")" .		
 Option      	= "[" Expression "]" .	
 Repetition  	= "{" Expression "}" .
@@ -55,11 +56,29 @@ To avoid both the complexity of maintaining a stateful lexer, and the difficulty
 
 Actions are code fragments that are executed at the successful reduction of a production, and are specified after a production as `Action { ... }`. All action fragments are executed as functions of a user-supplied data object, and this is where the user can build parse trees, maintain other state, and return data to the code calling the generated parser. Action blocks have access to the elements of the production they are called in by their position, similar to how `yacc` works. Variables in Action blocks are named `v1, v2 ...` and have the concrete type of the type they were specified with in the type declarators. Additionally, groups of alternatives also pass integers indicating which alternative was taken. For example, `foo | bar | baz` will generate variables `v1, v2, v3` and `a1Pos`. `a1Pos` indicates that it's the 1st alternative group in the production, and is a position indicator. `a1Pos` will point to which token (v1, v2, or v3) is valid.
 
-Along with actions, the user can supply an `Error { ... }` code fragment, that will be called in place of a production's default error, if one is encountered. The Error fragment is given the default error, position, pretty-printed position, and the most recently generated lexeme and literal value. This enables the user to directly create more useful errors.
+Along with actions, the user can supply an `Error { ... }` code fragment, that will be called in place of a production's default error, if one is encountered. The Error fragment is given the default error as `err`, the position the production started at as `pos`, the position its errors were at as `errPos`, and the same positional variables an Action gets. This enables the user to directly create more useful errors.
+
+When a parse fails, the error says in one line what the parser expected at the furthest position any attempt reached: `expected ';', '=' or an operator`. Literals are quoted, and the rest are what lexer functions and labels name. A lexer function that doesn't find its token says what it looked for by returning `<prefix>Expected("a number")`, an error type the generated parser defines. Any other error from a lexer function or an Error fragment, such as `use of undeclared identifier x`, is a real error. At the furthest position, real errors are reported instead of what the parser expected there, since they say more about what's wrong, one per line if there are several.
+
+That last rule is what a lexer function written against an older version of pbpg has to be updated for. A lexer function that reports a missing token with a plain error, such as `fmt.Errorf("not a number")`, is now saying that something is wrong rather than that it didn't match, and it hides what the parser expected alongside it: where the parser once reported `expected '(' and not a number`, it now reports only `not a number`. Return `<prefix>Expected` from the paths that mean "this isn't my token", and keep plain errors for the ones that mean the input is wrong, like an unterminated string or a reserved word used as a name.
+
+If the top production matches but input is left over, the parse fails with what the parser expected where it stopped, or, if it expected nothing there, with `unexpected input at offset 6` (`at token 6` in token mode).
+
+A production can have a label, a quoted string after its name that names what the production matches:
+
+```
+Number "a number" = [ Neg ] Digit { Digit } .
+```
+
+When a production with a label fails without matching anything (in string mode, anything but whitespace), its label replaces what it expected. Given `5+`, the calculator below reports `expected '(' or a number`, where without the label it would report `expected '(', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8' or '9'`. When the production fails further on, the error says what was expected there instead, and a label never replaces a real error.
+
+A label only covers what its production expected when the production *failed*, so a labeled production that matches and then stops still reports what it expected where it stopped. Given `5)`, the calculator reports `expected '*', '+', '-', '/', '0', '1', ... or '9'`: `Number` matched `5` and the digits come from its own `{ Digit }`, which ran out at the `)`. A production whose label names a single token, like `Number`, reads better written as a lexer function that returns `<prefix>Expected("a number")`, since a lexer function reports as one unit whether it matched or not. Labels on productions that name a phrase, like `Expression "an expression"`, are unaffected: `an operator` is exactly what should be reported after `a = 1 1`.
+
+A production's Error fragment sees the error with the production's label applied, and the error the fragment returns is reported at the position the production's own errors were at, which the fragment is given as `errPos`. That is not always where the parser stopped: a production that fails partway through leaves the position behind its errors.
 
 Whitespace *is trimmed* when parsing string literals. "foo" will match on both the input "foo bar" and "   foobar".
 
-Every element that can fail and be retried is a speculative attempt: each alternative of a choice, each group and option, and each iteration of a repetition. The parser saves its position before an attempt and restores it when the attempt fails, so every alternative starts where the first did, as in a PEG. Restoring it is the attempt's job, not the production's: a production that fails can leave the position partway through what it matched, and the attempt around it, if there is one, puts it back. It also resets the variables the attempt set to their zero values, so an action sees the terms of a failed attempt as unmatched. In `[ Label ":" ] Name`, for example, `v1` is empty unless the option matched. Each iteration of a repetition starts with its variables reset the same way, so the slices an action gets hold zero values for the terms an iteration didn't match. A repetition nested in another appends to its slice once per match of its own, rather than once per iteration of the enclosing one, and a failed attempt takes back what its iterations appended. Alternative positions are undone the same way: an `aPos` names the alternative its group matched in the result, and is `0` when the group matched only in attempts the parser discarded.
+Every element that can fail and be retried is a speculative attempt: each alternative of a choice, each group and option, and each iteration of a repetition. The parser saves its position before an attempt and restores it when the attempt fails, so every alternative starts where the first did, as in a PEG. Restoring it is the attempt's job, not the production's: a production that fails can leave the position partway through what it matched, and the attempt around it, if there is one, puts it back. It also resets the variables the attempt set to their zero values, so an action sees the terms of a failed attempt as unmatched. In `[ Label ":" ] Name`, for example, `v1` is empty unless the option matched. Each iteration of a repetition starts with its variables reset the same way, so the slices an action gets hold zero values for the terms an iteration didn't match. A repetition nested in another appends to its slice once per match of its own, rather than once per iteration of the enclosing one, and a failed attempt takes back what its iterations appended. Alternative positions are undone the same way: an `aPos` names the alternative its group matched in the result, and is `0` when nothing in the group matched, whether the parser never reached it or it matched only in an attempt that was discarded.
 
 The parser can't undo what actions, lexer functions, and error functions do to the data object, though. An action runs as soon as its production matches, even inside an attempt that fails afterwards, so an action that records something in the data object, such as a declared name, records it for attempts the parser then discards. A lexer function that counts brackets has the same problem. When the data object implements the generated `<prefix>Savepointer` interface, the parser calls it around every attempt:
 
@@ -185,7 +204,7 @@ MultOp 		= "*" | "/" .				Action {
 								}
 								return r
 							}
-Number 		= [ Neg ] Digit { Digit } .		Action {
+Number "a number" = [ Neg ] Digit { Digit } .		Action {
 								stringNumber := v1 + v2 + strings.Join(v3, "")
 								num, _ := strconv.Atoi(stringNumber)
 								return num

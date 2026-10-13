@@ -67,7 +67,7 @@ func (p *pbpgData) lexcode(input string) (int, string, error) {
 			quote = !quote
 		}
 	}
-	return 0, "", fmt.Errorf("could not extract token")
+	return 0, "", fmt.Errorf("unterminated code block")
 }
 
 func (p *pbpgData) lexname(input string) (int, string, error) {
@@ -80,12 +80,12 @@ func (p *pbpgData) lexname(input string) (int, string, error) {
 			offset += s
 			continue
 		}
-		if len(val) == 0 {
-			return 0, "", fmt.Errorf("could not extract name, got %v", string(r))
-		}
-		return offset, val, nil
+		break
 	}
-	return 0, "", fmt.Errorf("could not extract token")
+	if len(val) == 0 {
+		return 0, "", pbpgExpected("a name")
+	}
+	return offset, val, nil
 }
 
 func (p *pbpgData) lexfunctionname(input string) (int, string, error) {
@@ -128,7 +128,7 @@ func (p *pbpgData) lexquotedstring(input string) (int, string, error) {
 			return offset, val, nil
 		}
 	}
-	return 0, "", fmt.Errorf("could not extract token")
+	return 0, "", fmt.Errorf("unterminated string")
 }
 
 func (p *pbpgData) lextype(input string) (int, string, error) {

@@ -16,6 +16,50 @@ import (
 	"testing"
 )
 
+// run runs a command in dir, failing the test if it fails, and returns its
+// output.
+func run(t *testing.T, dir string, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOWORK=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v %v: %v\n%s", name, args, err, out)
+	}
+	return string(out)
+}
+
+// generate builds pbpg and runs it with the prefix Probe and flags on
+// testdata/grammar, in a new module in a temporary directory, which it
+// returns. files are written to the directory too, by name.
+func generate(t *testing.T, grammar string, files map[string]string, flags ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pbpg := filepath.Join(dir, "pbpg")
+	run(t, wd, "go", "build", "-o", pbpg, ".")
+	g, err := os.ReadFile(filepath.Join("testdata", grammar))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(grammar, string(g))
+	write("go.mod", "module probe\n\ngo 1.18\n")
+	for name, content := range files {
+		write(name, content)
+	}
+	run(t, dir, pbpg, append(append([]string{"-prefix", "Probe"}, flags...), grammar)...)
+	return dir
+}
+
 // TestBacktracking generates a parser from testdata/backtrack.b and runs it
 // on inputs whose parses show what the parser undoes when an attempt fails:
 // Data's state, through Data's savepoints, the position, and the variables
@@ -24,36 +68,7 @@ func TestBacktracking(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs a generated parser")
 	}
-	dir := t.TempDir()
-	run := func(dir string, name string, args ...string) string {
-		t.Helper()
-		cmd := exec.Command(name, args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GOFLAGS=", "GOWORK=off")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v %v: %v\n%s", name, args, err, out)
-		}
-		return string(out)
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	pbpg := filepath.Join(dir, "pbpg")
-	run(wd, "go", "build", "-o", pbpg, ".")
-	grammar, err := os.ReadFile(filepath.Join("testdata", "backtrack.b"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "backtrack.b"), grammar, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module probe\n\ngo 1.18\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	run(dir, pbpg, "-prefix", "Probe", "backtrack.b")
+	dir := generate(t, "backtrack.b", nil)
 
 	// each line is the result, the error, the declarations, and the
 	// savepoints left open
@@ -65,7 +80,7 @@ func TestBacktracking(t *testing.T) {
 		{"1 foo", `word foo | <nil> | [] | 0`},
 		// the second alternative starts where the first did
 		{"2 a y", `alternative 2 | <nil> | [] | 0`},
-		{"2 a z", "\x20| expected y\nexpected x | [] | 0"},
+		{"2 a z", "\x20| expected 'x' or 'y' | [] | 0"},
 		// a failed option leaves its variables unset
 		{"3 bar", `label="" name="bar" | <nil> | [] | 0`},
 		{"3 foo: bar", `label="foo" name="bar" | <nil> | [] | 0`},
@@ -80,7 +95,7 @@ func TestBacktracking(t *testing.T) {
 		{"7 a!!,", `words=["a"] bangs=["!" "!"] commas=[","] | <nil> | [] | 0`},
 		// a failed iteration takes back what its nested repetition
 		// appended, so the trailing input is left unparsed
-		{"7 a!,b!!", "words=[\"a\"] bangs=[\"!\"] commas=[\",\"] | expected ,\nexpected ! | [] | 0"},
+		{"7 a!,b!!", `words=["a"] bangs=["!"] commas=[","] | expected '!' or ',' | [] | 0`},
 		// a backtracked attempt restores the alternative positions it set
 		{"8 a", `a1Pos=0 name="a" | <nil> | [] | 0`},
 		{"8 b:x", `a1Pos=2 name="x" | <nil> | [] | 0`},
@@ -94,7 +109,7 @@ func TestBacktracking(t *testing.T) {
 		args = append(args, tt.in)
 		want = append(want, tt.want)
 	}
-	if got, want := run(dir, "go", args...), strings.Join(want, "\n")+"\n"; got != want {
+	if got, want := run(t, dir, "go", args...), strings.Join(want, "\n")+"\n"; got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }

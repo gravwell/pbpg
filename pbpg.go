@@ -109,9 +109,6 @@ func (p *pbpgParser) stateTypes() error {
 	var v2 string
 	var v3 string
 	v1, err = p.literal("type")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateName()
@@ -167,59 +164,54 @@ func (p *pbpgParser) stateLine() error {
 	return err
 }
 
-// Production = Name "=" [ Expression ] "." [ Action ] [ Error ]
+// Production = Name [ Label ] "=" [ Expression ] "." [ Action ] [ Error ]
 func (p *pbpgParser) stateProduction() error {
 	var err error
 	var v1 string
 	var v2 string
-	var v3 *Expression
-	var v4 string
+	var v3 string
+	var v4 *Expression
 	var v5 string
 	var v6 string
+	var v7 string
 	p.errorStack.push()
 	v1, err = p.stateName()
 	p.errorStack.pop()
 	if err == nil {
-		v2, err = p.literal("=")
+		// option
+		p = p.predict()
+		p.errorStack.push()
+		v2, err = p.stateLabel()
+		p.errorStack.pop()
 		if err != nil {
-			p.errorStack.error(err, p.pos)
+			p = p.backtrack()
+			err = nil
+			v2 = ""
+		} else {
+			p = p.accept()
 		}
 		if err == nil {
-			// option
-			p = p.predict()
-			p.errorStack.push()
-			v3, err = p.stateExpression()
-			p.errorStack.pop()
-			if err != nil {
-				p = p.backtrack()
-				err = nil
-				v3 = *new(*Expression)
-			} else {
-				p = p.accept()
-			}
+			v3, err = p.literal("=")
 			if err == nil {
-				v4, err = p.literal(".")
+				// option
+				p = p.predict()
+				p.errorStack.push()
+				v4, err = p.stateExpression()
+				p.errorStack.pop()
 				if err != nil {
-					p.errorStack.error(err, p.pos)
+					p = p.backtrack()
+					err = nil
+					v4 = *new(*Expression)
+				} else {
+					p = p.accept()
 				}
 				if err == nil {
-					// option
-					p = p.predict()
-					p.errorStack.push()
-					v5, err = p.stateAction()
-					p.errorStack.pop()
-					if err != nil {
-						p = p.backtrack()
-						err = nil
-						v5 = ""
-					} else {
-						p = p.accept()
-					}
+					v5, err = p.literal(".")
 					if err == nil {
 						// option
 						p = p.predict()
 						p.errorStack.push()
-						v6, err = p.stateError()
+						v6, err = p.stateAction()
 						p.errorStack.pop()
 						if err != nil {
 							p = p.backtrack()
@@ -228,26 +220,46 @@ func (p *pbpgParser) stateProduction() error {
 						} else {
 							p = p.accept()
 						}
+						if err == nil {
+							// option
+							p = p.predict()
+							p.errorStack.push()
+							v7, err = p.stateError()
+							p.errorStack.pop()
+							if err != nil {
+								p = p.backtrack()
+								err = nil
+								v7 = ""
+							} else {
+								p = p.accept()
+							}
+						}
 					}
 				}
 			}
 		}
 	}
 	if err == nil {
-		p.Data.actionProduction(p.pos, v1, v2, v3, v4, v5, v6)
+		p.Data.actionProduction(p.pos, v1, v2, v3, v4, v5, v6, v7)
 	}
 
 	return err
 }
 
-func (p *pbpgData) actionProduction(pos int, v1 string, v2 string, v3 *Expression, v4 string, v5 string, v6 string) {
+func (p *pbpgData) actionProduction(pos int, v1 string, v2 string, v3 string, v4 *Expression, v5 string, v6 string, v7 string) {
 	if p.stateMap[v1] != nil {
 		log.Fatalf("%v redeclared", v1)
 	}
-	setEntry(p, p.stateMap, v1, v3)
+	setEntry(p, p.stateMap, v1, v4)
+	if v2 != "" {
+		if p.labels == nil {
+			p.labels = make(map[string]string)
+		}
+		setEntry(p, p.labels, v1, v2)
+	}
 	p.orderedStates = append(p.orderedStates, v1)
 
-	p.emitState(v1, v3, v5, v6)
+	p.emitState(v1, v2, v4, v6, v7)
 
 	if p.entryPoint == "" {
 		p.entryPoint = v1
@@ -262,9 +274,6 @@ func (p *pbpgParser) stateAction() (string, error) {
 	var v1 string
 	var v2 string
 	v1, err = p.literal("Action")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateCodeBlock()
@@ -288,9 +297,6 @@ func (p *pbpgParser) stateError() (string, error) {
 	var v1 string
 	var v2 string
 	v1, err = p.literal("Error")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateCodeBlock()
@@ -315,18 +321,12 @@ func (p *pbpgParser) stateCodeBlock() (string, error) {
 	var v2 string
 	var v3 string
 	v1, err = p.literal("{")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateCode()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("}")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err == nil {
@@ -359,9 +359,6 @@ func (p *pbpgParser) stateExpression() (*Expression, error) {
 			v2temp = ""
 			v3temp = *new(*Alternative)
 			v2temp, err = p.literal("|")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 			if err == nil {
 				p.errorStack.push()
 				v3temp, err = p.stateAlternative()
@@ -428,9 +425,10 @@ func (p *pbpgData) actionAlternative(pos int, v1 *Term, v2 []*Term) *Alternative
 	return &Alternative{terms: append([]*Term{v1}, v2...)}
 }
 
-// Term = Lex | Name | Literal | Group | Option | Repetition
+// Term "a term" = Lex | Name | Literal | Group | Option | Repetition
 func (p *pbpgParser) stateTerm() (*Term, error) {
 	var err error
+	entryPos := p.pos
 	var ret *Term
 	var a1Pos int
 	var v1 string
@@ -511,6 +509,10 @@ func (p *pbpgParser) stateTerm() (*Term, error) {
 			}
 		}
 	}
+	if err != nil {
+		p.label("a term", entryPos)
+	}
+
 	if err == nil {
 		ret = p.Data.actionTerm(p.pos, a1Pos, v1, v2, v3, v4, v5, v6)
 	}
@@ -552,18 +554,12 @@ func (p *pbpgParser) stateGroup() (*GOR, error) {
 	var v2 *Expression
 	var v3 string
 	v1, err = p.literal("(")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateExpression()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal(")")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err == nil {
@@ -585,18 +581,12 @@ func (p *pbpgParser) stateOption() (*GOR, error) {
 	var v2 *Expression
 	var v3 string
 	v1, err = p.literal("[")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateExpression()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("]")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err == nil {
@@ -618,18 +608,12 @@ func (p *pbpgParser) stateRepetition() (*GOR, error) {
 	var v2 *Expression
 	var v3 string
 	v1, err = p.literal("{")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateExpression()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("}")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err == nil {
@@ -652,14 +636,8 @@ func (p *pbpgParser) stateLex() (string, error) {
 	var v3 string
 	var v4 string
 	v1, err = p.literal("lex")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		v2, err = p.literal("(")
-		if err != nil {
-			p.errorStack.error(err, p.pos)
-		}
 		if err == nil {
 			{
 				n, lexeme, lerr := p.Data.lexfunctionname(p.input[p.pos:])
@@ -676,9 +654,6 @@ func (p *pbpgParser) stateLex() (string, error) {
 			}
 			if err == nil {
 				v4, err = p.literal(")")
-				if err != nil {
-					p.errorStack.error(err, p.pos)
-				}
 			}
 		}
 	}
@@ -701,18 +676,12 @@ func (p *pbpgParser) stateLiteral() (string, error) {
 	var v2 string
 	var v3 string
 	v1, err = p.literal("\"")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		p.errorStack.push()
 		v2, err = p.stateQuotedString()
 		p.errorStack.pop()
 		if err == nil {
 			v3, err = p.literal("\"")
-			if err != nil {
-				p.errorStack.error(err, p.pos)
-			}
 		}
 	}
 	if err == nil {
@@ -724,6 +693,25 @@ func (p *pbpgParser) stateLiteral() (string, error) {
 
 func (p *pbpgData) actionLiteral(pos int, v1 string, v2 string, v3 string) string {
 	return v2
+}
+
+// Label = Literal
+func (p *pbpgParser) stateLabel() (string, error) {
+	var err error
+	var ret string
+	var v1 string
+	p.errorStack.push()
+	v1, err = p.stateLiteral()
+	p.errorStack.pop()
+	if err == nil {
+		ret = p.Data.actionLabel(p.pos, v1)
+	}
+
+	return ret, err
+}
+
+func (p *pbpgData) actionLabel(pos int, v1 string) string {
+	return v1
 }
 
 // Name = name
@@ -821,9 +809,6 @@ func (p *pbpgParser) stateComment() error {
 	var v1 string
 	var v2 string
 	v1, err = p.literal("#")
-	if err != nil {
-		p.errorStack.error(err, p.pos)
-	}
 	if err == nil {
 		{
 			n, lexeme, lerr := p.Data.lexcomment(p.input[p.pos:])
@@ -855,8 +840,15 @@ func Parsepbpg(input string, data *pbpgData) error {
 
 	err := p.stateProgram()
 	if err == nil {
-		if strings.TrimSpace(p.input[p.pos:]) != "" {
+		if rest := strings.TrimLeftFunc(p.input[p.pos:], unicode.IsSpace); rest != "" {
+			// the top production matched but input is left over. The
+			// parser may have recorded nothing it expected, in which case
+			// coalesce is nil and the trailing input needs an error of its
+			// own, or the parse would be reported as a success.
 			err = p.errorStack.coalesce()
+			if err == nil {
+				err = fmt.Errorf("unexpected input at offset %v", len(p.input)-len(rest))
+			}
 			return err
 		}
 	} else {
@@ -871,7 +863,7 @@ type pbpgParser struct {
 	pos         int
 	lineOffsets []int
 	Data        *pbpgData
-	errorStack  *parserErrorStack
+	errorStack  *pbpgErrorStack
 
 	posStack []int
 
@@ -884,8 +876,8 @@ func newpbpgParser(input string, data *pbpgData) *pbpgParser {
 		input:       input,
 		lineOffsets: pbpgGenerateLineOffsets(input),
 		Data:        data,
-		errorStack: &parserErrorStack{
-			stack:  make([]parseError, 0, 64),
+		errorStack: &pbpgErrorStack{
+			stack:  make([]pbpgParseError, 0, 64),
 			scopes: make([]int, 0, 64),
 		},
 		posStack: make([]int, 0, 64),
@@ -910,8 +902,8 @@ func pbpgGenerateLineOffsets(input string) []int {
 }
 
 // literal runs on every token match attempt during speculative parsing, so
-// it must not allocate; expected-token errors are interned in the generated
-// parserLiteralErrs map.
+// it must not allocate; it records what it expected as data, and returns the
+// same error every time.
 func (p *pbpgParser) literal(want string) (string, error) {
 	count := 0
 	for r, s := utf8.DecodeRuneInString(p.input[p.pos+count:]); s > 0 && unicode.IsSpace(r); r, s = utf8.DecodeRuneInString(p.input[p.pos+count:]) {
@@ -923,10 +915,14 @@ func (p *pbpgParser) literal(want string) (string, error) {
 		return want, nil
 	}
 
-	if err, ok := parserLiteralErrs[want]; ok {
-		return "", err
-	}
-	return "", fmt.Errorf("expected %v", want)
+	p.errorStack.expect(want, p.pos)
+	return "", pbpgNoMatch
+}
+
+// blank reports whether the input from start to end is only whitespace,
+// which literals skip.
+func (p *pbpgParser) blank(start, end int) bool {
+	return strings.TrimSpace(p.input[start:end]) == ""
 }
 
 // pbpgSavepointer is implemented by a pbpgData whose actions, lexer
@@ -975,7 +971,7 @@ func (p *pbpgParser) accept() *pbpgParser {
 	return p
 }
 
-// parserErrorStack accumulates parse errors in a single reusable backing
+// pbpgErrorStack accumulates parse errors in a single reusable backing
 // array.  Speculative parse attempts open a scope (push) around each state
 // call and close it afterwards (pop); recorded errors are kept when a scope
 // pops, while clear, coalesce, and depth operate on the innermost open scope
@@ -983,111 +979,244 @@ func (p *pbpgParser) accept() *pbpgParser {
 // attempt, which both burns CPU and creates a new runtime memory-profile
 // bucket for every unique recursion stack in long-running processes.
 //
-// coalesce reports only the errors at the furthest position in a scope, so
-// a scope keeps only those: an error behind them isn't recorded, one past
-// them replaces them, and a scope that pops is merged into its parent the
-// same way. Every scope's errors are therefore at one position, and the
-// stack stays small however many speculative attempts fail.
-type parserErrorStack struct {
-	stack  []parseError
+// An error is either an expectation, something the parser looked for and
+// didn't find (a literal, a production's label, or what a lexer function
+// returned as a pbpgExpected), or a real error: any other error from a
+// lexer function or an Error function. coalesce reports only the errors
+// that rank highest in a scope: those furthest into the input, and at one
+// position, real errors over expectations. So a scope keeps only those: an
+// error that ranks lower isn't recorded, one that ranks higher replaces
+// them, and a scope that pops is merged into its parent the same way. Every
+// scope's errors therefore rank alike, and the stack stays small however
+// many speculative attempts fail.
+type pbpgErrorStack struct {
+	stack  []pbpgParseError
 	scopes []int
 	es     []error // scratch buffer reused by coalesce
 }
 
-type parseError struct {
-	err error
-	pos int
+// pbpgParseError is a real error, or when err is nil, an expectation of
+// expected.
+type pbpgParseError struct {
+	err      error
+	expected string
+	literal  bool // expected is a literal, which messages quote
+	pos      int
 }
 
+// rank orders errors for reporting: errors further into the input rank
+// higher, and at one position, real errors rank higher than expectations.
+func (pe pbpgParseError) rank() int {
+	if pe.err != nil {
+		return 2*pe.pos + 1
+	}
+	return 2 * pe.pos
+}
+
+// pbpgExpected is the error a lexer function returns when the input doesn't
+// start with its token, naming the token, such as "a number". The parser
+// lists it with the other things it expected at the same position, as in
+// "expected ';' or a number", rather than reporting it as an error of its
+// own.
+type pbpgExpected string
+
+func (e pbpgExpected) Error() string {
+	return "expected " + string(e)
+}
+
+// pbpgNoMatch is the error literal returns when the input doesn't start
+// with the literal. It only signals the failure: literal records what it
+// expected in the error stack.
+var pbpgNoMatch = errors.New("literal not matched")
+
 // push opens an error scope around a speculative parse attempt.
-func (e *parserErrorStack) push() {
+func (e *pbpgErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
 // pop closes the innermost scope, merging it into the parent: only the
-// errors at the furthest position survive. The closing scope's errors are
-// dropped when they are behind the parent's own, they replace the parent's
-// errors when they are past them, and a tie keeps both.
-func (e *parserErrorStack) pop() {
+// errors that rank highest survive. The closing scope's errors are dropped
+// when they rank below the parent's own, they replace the parent's errors
+// when they rank above them, and a tie keeps both.
+func (e *pbpgErrorStack) pop() {
 	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
 	outer, n := e.scopeBase(), len(e.stack)
 	if inner == n || inner == outer {
 		return
 	}
-	switch op, ip := e.stack[inner-1].pos, e.stack[n-1].pos; {
-	case ip < op:
+	switch or, ir := e.stack[inner-1].rank(), e.stack[n-1].rank(); {
+	case ir < or:
 		e.stack = e.stack[:inner]
-	case ip > op:
+	case ir > or:
 		e.stack = append(e.stack[:outer], e.stack[inner:]...)
 	}
 }
 
-func (e *parserErrorStack) scopeBase() int {
+func (e *pbpgErrorStack) scopeBase() int {
 	if n := len(e.scopes); n > 0 {
 		return e.scopes[n-1]
 	}
 	return 0
 }
 
-func (e *parserErrorStack) clear() {
+func (e *pbpgErrorStack) clear() {
 	e.stack = e.stack[:e.scopeBase()]
 }
 
-func (e *parserErrorStack) error(err error, pos int) {
+// error records err at pos, as an expectation if it's a pbpgExpected.
+func (e *pbpgErrorStack) error(err error, pos int) {
+	if want, ok := err.(pbpgExpected); ok {
+		e.add(pbpgParseError{expected: string(want), pos: pos})
+	} else {
+		e.add(pbpgParseError{err: err, pos: pos})
+	}
+}
+
+// expect records that the parser expected the literal lit at pos.
+func (e *pbpgErrorStack) expect(lit string, pos int) {
+	e.add(pbpgParseError{expected: lit, literal: true, pos: pos})
+}
+
+func (e *pbpgErrorStack) add(pe pbpgParseError) {
 	if base, n := e.scopeBase(), len(e.stack); n > base {
-		if top := e.stack[n-1].pos; pos < top {
+		if top := e.stack[n-1].rank(); pe.rank() < top {
 			return
-		} else if pos > top {
+		} else if pe.rank() > top {
 			e.stack = e.stack[:base]
 		}
 	}
-	e.stack = append(e.stack, parseError{err: err, pos: pos})
+	e.stack = append(e.stack, pe)
 }
 
-func (e *parserErrorStack) coalesce() error {
-	var bestDepth int
-	es := e.es[:0]
-
-COALESCE_OUTER:
-	for _, v := range e.stack[e.scopeBase():] {
-		if v.pos > bestDepth {
-			bestDepth = v.pos
-			es = append(es[:0], v.err)
-		} else if v.pos == bestDepth {
-			// deduplicate errors at a given depth by message. Comparing the
-			// error values first measured slower, and it panics on two
-			// errors of the same uncomparable type.
-			for _, w := range es {
-				if w.Error() == v.err.Error() {
-					continue COALESCE_OUTER
-				}
-			}
-			es = append(es, v.err)
+// label replaces the innermost scope's errors with an expectation of want,
+// a production's label, at the same position, if they're expectations. A
+// scope with no errors gets the expectation at start.
+func (e *pbpgErrorStack) label(want string, start int) {
+	base, n := e.scopeBase(), len(e.stack)
+	pos := start
+	if n > base {
+		if e.stack[n-1].err != nil {
+			return
 		}
+		pos = e.stack[n-1].pos
+	}
+	e.stack = append(e.stack[:base], pbpgParseError{expected: want, pos: pos})
+}
+
+// coalesce returns the innermost scope's errors as one error: nil if there
+// are none, an pbpgExpectedError listing them if they're expectations, and
+// otherwise the real errors, each message once, one per line.
+func (e *pbpgErrorStack) coalesce() error {
+	scope := e.stack[e.scopeBase():]
+	if len(scope) == 0 {
+		return nil
+	}
+	if scope[0].err == nil {
+		// a scope's errors rank alike, so they're all expectations. The
+		// error escapes into user code, so it can't be pooled, but it
+		// carries its own small buffer, which keeps the usual short list
+		// to one allocation.
+		ee := &pbpgExpectedError{}
+		ee.want = append(ee.buf[:0], scope...)
+		return ee
+	}
+
+	es := e.es[:0]
+COALESCE_OUTER:
+	for _, v := range scope {
+		// deduplicate errors by message. Comparing the error values first
+		// measured slower, and it panics on two errors of the same
+		// uncomparable type.
+		for _, w := range es {
+			if w.Error() == v.err.Error() {
+				continue COALESCE_OUTER
+			}
+		}
+		es = append(es, v.err)
 	}
 	e.es = es[:0]
 
-	if len(es) == 0 {
-		return nil
-	} else if len(es) == 1 {
+	if len(es) == 1 {
 		return es[0]
 	}
 	// defer building the joined message until something reads it; failure
 	// handlers coalesce on every failed speculative attempt and almost
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
-	return &joinedError{es: append([]error(nil), es...)}
+	return &pbpgJoinedError{es: append([]error(nil), es...)}
 }
 
-// joinedError is a multi-error whose message is rendered lazily and
+// pbpgExpectedError is what the parser expected at a position, as one message:
+// "expected ';', '=' or an operator". Each thing expected is listed once,
+// the literals first, quoted, and then the rest, each group sorted. Like
+// pbpgJoinedError's, the message is rendered when it's first read.
+type pbpgExpectedError struct {
+	want []pbpgParseError
+	// buf is where want is built, so that the usual short list of things
+	// expected costs no allocation beyond the error itself
+	buf [4]pbpgParseError
+	msg string
+}
+
+func (e *pbpgExpectedError) Error() string {
+	if e.msg == "" {
+		// an insertion sort, since the lists are short; ws[:lits] are the
+		// literals
+		var ws []string
+		lits := 0
+	WANT:
+		for _, v := range e.want {
+			w, lo, hi := v.expected, lits, len(ws)
+			if v.literal {
+				w, lo, hi = pbpgQuoteLiteral(w), 0, lits
+			}
+			i := lo
+			for ; i < hi && ws[i] <= w; i++ {
+				if ws[i] == w {
+					continue WANT
+				}
+			}
+			ws = append(ws, "")
+			copy(ws[i+1:], ws[i:])
+			ws[i] = w
+			if v.literal {
+				lits++
+			}
+		}
+
+		var sb strings.Builder
+		sb.WriteString("expected ")
+		for i, w := range ws {
+			if i > 0 && i == len(ws)-1 {
+				sb.WriteString(" or ")
+			} else if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(w)
+		}
+		e.msg = sb.String()
+	}
+	return e.msg
+}
+
+// pbpgQuoteLiteral quotes a literal for an error message, in single quotes
+// unless it has one.
+func pbpgQuoteLiteral(s string) string {
+	if strings.Contains(s, "'") {
+		return fmt.Sprintf("%q", s)
+	}
+	return "'" + s + "'"
+}
+
+// pbpgJoinedError is a multi-error whose message is rendered lazily and
 // memoized.  It prints the error stack in reverse order.
-type joinedError struct {
+type pbpgJoinedError struct {
 	es  []error
 	msg string
 }
 
-func (j *joinedError) Error() string {
+func (j *pbpgJoinedError) Error() string {
 	if j.msg == "" {
 		var sb strings.Builder
 		for i := len(j.es) - 1; i >= 0; i-- {
@@ -1099,7 +1228,7 @@ func (j *joinedError) Error() string {
 	return j.msg
 }
 
-func (e *parserErrorStack) depth() int {
+func (e *pbpgErrorStack) depth() int {
 	var ret int
 	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
@@ -1109,20 +1238,15 @@ func (e *parserErrorStack) depth() int {
 	return ret
 }
 
-var parserLiteralErrs = map[string]error{
-	"\"":     errors.New("expected \""),
-	"#":      errors.New("expected #"),
-	"(":      errors.New("expected ("),
-	")":      errors.New("expected )"),
-	".":      errors.New("expected ."),
-	"=":      errors.New("expected ="),
-	"Action": errors.New("expected Action"),
-	"Error":  errors.New("expected Error"),
-	"[":      errors.New("expected ["),
-	"]":      errors.New("expected ]"),
-	"lex":    errors.New("expected lex"),
-	"type":   errors.New("expected type"),
-	"{":      errors.New("expected {"),
-	"|":      errors.New("expected |"),
-	"}":      errors.New("expected }"),
+// label is called when a production with a label fails. If the production
+// failed before matching anything, that is, if its errors are at start,
+// where it started, or past only whitespace in string mode, then what it
+// expected is what its label names, and the label replaces the
+// expectations it recorded. Errors further on are left as they are, since
+// they say what was expected there, and so are real errors.
+func (p *pbpgParser) label(want string, start int) {
+	if d := p.errorStack.depth(); d > start && !p.blank(start, d) {
+		return
+	}
+	p.errorStack.label(want, start)
 }
