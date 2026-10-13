@@ -25,6 +25,7 @@ type CodeBlock string
 type Error string
 type Action string
 type Name string
+type Label string
 type QuotedString string
 
 # The top level production is the initial state to attempt to reduce.
@@ -38,14 +39,17 @@ Types       = "type" Name lex(type) .						Action {
 											setEntry(p, p.typeMap, v2, v3)
 										}
 Line        = Comment | Production .
-Production  = Name "=" [ Expression ] "." [ Action ] [ Error ] .		Action { 
+Production  = Name [ Label ] "=" [ Expression ] "." [ Action ] [ Error ] .	Action { 
 											if p.stateMap[v1] != nil {
 												log.Fatalf("%v redeclared", v1)
 											}
-											setEntry(p, p.stateMap, v1, v3)
+											setEntry(p, p.stateMap, v1, v4)
+											if v2 != "" {
+												setEntry(p, p.labels, v1, v2)
+											}
 											p.orderedStates = append(p.orderedStates, v1)
 											
-											p.emitState(v1, v3, v5, v6)
+											p.emitState(v1, v2, v4, v6, v7)
 
 											if p.entryPoint == "" {
 												p.entryPoint = v1
@@ -56,7 +60,7 @@ Error       = "Error" CodeBlock .						Action { return v2; }
 CodeBlock   = "{" Code "}" .							Action { return v2; }
 Expression  = Alternative { "|" Alternative } .					Action { return &Expression{ alternatives: append([]*Alternative{v1}, v3...)}; }
 Alternative = Term { Term } .							Action { return &Alternative{terms: append([]*Term{v1}, v2...)}; }
-Term        = Lex | Name | Literal | Group | Option | Repetition .		Action { 
+Term "a term" = Lex | Name | Literal | Group | Option | Repetition .		Action { 
 											t := &Term{}
 											switch a1Pos {
 												case 1:
@@ -85,6 +89,7 @@ Option      = "[" Expression "]" .						Action { return &GOR{ option: GOR_OPTION
 Repetition  = "{" Expression "}" .						Action { return &GOR{ option: GOR_REPETITION, expression: v2}; }
 Lex         = "lex" "(" lex(functionname) ")" .					Action { return v3; }
 Literal     = "\"" QuotedString "\"" .						Action { return v2; }
+Label       = Literal .								Action { return v1; }
 Name	    = lex(name) .							Action { return v1; }
 
 # Lexer directives. 

@@ -18,7 +18,7 @@ func (d *pbpgData) PrintGrammar() string {
 	w := tabwriter.NewWriter(&s, 0, 0, 1, ' ', 0)
 	for _, v := range d.orderedStates {
 		e := d.stateMap[v]
-		row := fmt.Sprintf("%v\t=\t%v\n", v, e.String())
+		row := fmt.Sprintf("%v\t=\t%v\n", productionName(v, d.labels[v]), e.String())
 		w.Write([]byte(row))
 	}
 	w.Flush()

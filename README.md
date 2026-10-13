@@ -21,13 +21,14 @@ Program     	= { Comment } [ Header ] { Types } Line { Line } .
 Header      	= "{" Code "}" .
 Types	    	= "type" Name lex(type) .
 Line        	= Comment | Production .
-Production  	= Name "=" [ Expression ] "." [ Action ] [ Error ] .
+Production  	= Name [ Label ] "=" [ Expression ] "." [ Action ] [ Error ] .
+Label       	= Literal .
 Action      	= "Action" CodeBlock .
 Error       	= "Error" CodeBlock .
 CodeBlock   	= "{" Code "}" .						
 Expression  	= Alternative { "|" Alternative } .	
 Alternative 	= Term { Term } .		
-Term        	= Lex | Name | Literal | Group | Option | Repetition .
+Term "a term"	= Lex | Name | Literal | Group | Option | Repetition .
 Group       	= "(" Expression ")" .		
 Option      	= "[" Expression "]" .	
 Repetition  	= "{" Expression "}" .
@@ -57,9 +58,19 @@ Actions are code fragments that are executed at the successful reduction of a pr
 
 Along with actions, the user can supply an `Error { ... }` code fragment, that will be called in place of a production's default error, if one is encountered. The Error fragment is given the default error, position, pretty-printed position, and the most recently generated lexeme and literal value. This enables the user to directly create more useful errors.
 
+When a parse fails, the error says in one line what the parser expected at the furthest position any attempt reached: `expected ';', '=' or an operator`. Literals are quoted, and the rest are what lexer functions and labels name. A lexer function that doesn't find its token says what it looked for by returning `parseExpected("a number")`, an error type the generated parser defines. Any other error from a lexer function or an Error fragment, such as `use of undeclared identifier x`, is a real error. At the furthest position, real errors are reported instead of what the parser expected there, since they say more about what's wrong, one per line if there are several.
+
+A production can have a label, a quoted string after its name that names what the production matches:
+
+```
+Number "a number" = [ Neg ] Digit { Digit } .
+```
+
+When a production with a label fails without matching anything (in string mode, anything but whitespace), its label replaces what it expected. Given `5+`, the calculator below reports `expected '(' or a number`, where without the label it would report `expected '(', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8' or '9'`. When the production fails further on, the error says what was expected there instead, and a label never replaces a real error. A production's Error fragment sees the error with the production's label applied.
+
 Whitespace *is trimmed* when parsing string literals. "foo" will match on both the input "foo bar" and "   foobar".
 
-Every element that can fail and be retried is a speculative attempt: each alternative of a choice, each group and option, and each iteration of a repetition. The parser saves its position before an attempt and restores it when the attempt fails, so every alternative starts where the first did, as in a PEG. Restoring it is the attempt's job, not the production's: a production that fails can leave the position partway through what it matched, and the attempt around it, if there is one, puts it back. It also resets the variables the attempt set to their zero values, so an action sees the terms of a failed attempt as unmatched. In `[ Label ":" ] Name`, for example, `v1` is empty unless the option matched. Each iteration of a repetition starts with its variables reset the same way, so the slices an action gets hold zero values for the terms an iteration didn't match. A repetition nested in another appends to its slice once per match of its own, rather than once per iteration of the enclosing one, and a failed attempt takes back what its iterations appended. Alternative positions are undone the same way: an `aPos` names the alternative its group matched in the result, and is `0` when the group matched only in attempts the parser discarded.
+Every element that can fail and be retried is a speculative attempt: each alternative of a choice, each group and option, and each iteration of a repetition. The parser saves its position before an attempt and restores it when the attempt fails, so every alternative starts where the first did, as in a PEG. Restoring it is the attempt's job, not the production's: a production that fails can leave the position partway through what it matched, and the attempt around it, if there is one, puts it back. It also resets the variables the attempt set to their zero values, so an action sees the terms of a failed attempt as unmatched. In `[ Label ":" ] Name`, for example, `v1` is empty unless the option matched. Each iteration of a repetition starts with its variables reset the same way, so the slices an action gets hold zero values for the terms an iteration didn't match. A repetition nested in another appends to its slice once per match of its own, rather than once per iteration of the enclosing one, and a failed attempt takes back what its iterations appended. Alternative positions are undone the same way: an `aPos` names the alternative its group matched in the result, and is `0` when nothing in the group matched, whether the parser never reached it or it matched only in an attempt that was discarded.
 
 The parser can't undo what actions, lexer functions, and error functions do to the data object, though. An action runs as soon as its production matches, even inside an attempt that fails afterwards, so an action that records something in the data object, such as a declared name, records it for attempts the parser then discards. A lexer function that counts brackets has the same problem. When the data object implements the generated `<prefix>Savepointer` interface, the parser calls it around every attempt:
 
@@ -185,7 +196,7 @@ MultOp 		= "*" | "/" .				Action {
 								}
 								return r
 							}
-Number 		= [ Neg ] Digit { Digit } .		Action {
+Number "a number" = [ Neg ] Digit { Digit } .		Action {
 								stringNumber := v1 + v2 + strings.Join(v3, "")
 								num, _ := strconv.Atoi(stringNumber)
 								return num

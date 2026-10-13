@@ -80,12 +80,12 @@ func (p *pbpgData) lexname(input string) (int, string, error) {
 			offset += s
 			continue
 		}
-		if len(val) == 0 {
-			return 0, "", fmt.Errorf("could not extract name, got %v", string(r))
-		}
-		return offset, val, nil
+		break
 	}
-	return 0, "", fmt.Errorf("could not extract token")
+	if len(val) == 0 {
+		return 0, "", parseExpected("a name")
+	}
+	return offset, val, nil
 }
 
 func (p *pbpgData) lexfunctionname(input string) (int, string, error) {

@@ -87,7 +87,7 @@ MultOp 		= "*" | "/" .				Action {
 								}
 								return r
 							}
-Number 		= [ Neg ] Digit { Digit } .		Action {
+Number "a number" = [ Neg ] Digit { Digit } .		Action {
 								stringNumber := v1 + v2 + strings.Join(v3, "")
 								num, _ := strconv.Atoi(stringNumber)
 								return num

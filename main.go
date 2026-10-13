@@ -49,6 +49,7 @@ func main() {
 		typeMap:    make(map[string]string),
 		stateMap:   make(map[string]*Expression),
 		statesUsed: make(map[string]bool),
+		labels:     make(map[string]string),
 	}
 	err = Parsepbpg(string(input), data)
 	if err != nil {
@@ -82,7 +83,6 @@ func main() {
 
 	data.out.WriteString(strings.ReplaceAll(backtracking, PREFIX, *fPrefix))
 	data.out.WriteString(strings.ReplaceAll(errorRecovery, PREFIX, *fPrefix))
-	data.out.WriteString(data.literalErrorMap())
 
 	formatted, err := format.Source([]byte(data.out.String()))
 	if err != nil {
