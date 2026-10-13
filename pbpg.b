@@ -45,6 +45,9 @@ Production  = Name [ Label ] "=" [ Expression ] "." [ Action ] [ Error ] .	Actio
 											}
 											setEntry(p, p.stateMap, v1, v4)
 											if v2 != "" {
+												if p.labels == nil {
+													p.labels = make(map[string]string)
+												}
 												setEntry(p, p.labels, v1, v2)
 											}
 											p.orderedStates = append(p.orderedStates, v1)

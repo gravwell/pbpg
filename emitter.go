@@ -557,7 +557,11 @@ func (p *pbpgData) emitState(name, label string, exp *Expression, a, e string) {
 		if pa != "" {
 			args = ", " + pa
 		}
-		p.out.WriteString(fmt.Sprintf("if err != nil { terr := p.errorStack.coalesce(); rerr := p.Data.error%v(entryPos, p.errorStack.depth(), terr %v); if rerr != terr { p.errorStack.clear(); p.errorStack.error(rerr, p.pos); } }\n\n", name, args))
+		// the replacement error is recorded where the production's own
+		// errors were, not at p.pos, which a failure partway through
+		// leaves behind them: recorded at p.pos it would rank below a
+		// sibling attempt's expectations and be dropped
+		p.out.WriteString(fmt.Sprintf("if err != nil { terr := p.errorStack.coalesce(); errPos := p.errorStack.depth(); rerr := p.Data.error%v(entryPos, errPos, terr %v); if rerr != terr { p.errorStack.clear(); p.errorStack.error(rerr, errPos); } }\n\n", name, args))
 	}
 
 	if hasType {
@@ -652,7 +656,7 @@ func (p *pbpgData) visitTerm(vCount int, aCount int, term *Term, rep bool, hasAc
 	switch term.option {
 	case TERM_NAME:
 		// states get their own error scope, which is merged into the
-		// parent's when it pops (see parserErrorStack), while
+		// parent's when it pops (see _PREFIX_ErrorStack), while
 		// clear/coalesce/depth operate on the innermost open scope only
 		p.out.WriteString("p.errorStack.push()\n")
 
@@ -760,7 +764,7 @@ func (p *pbpgData) visitGOR(vCount int, aCount int, gor *GOR, rep bool, hasActio
 
 var errorRecovery = `
 
-// parserErrorStack accumulates parse errors in a single reusable backing
+// _PREFIX_ErrorStack accumulates parse errors in a single reusable backing
 // array.  Speculative parse attempts open a scope (push) around each state
 // call and close it afterwards (pop); recorded errors are kept when a scope
 // pops, while clear, coalesce, and depth operate on the innermost open scope
@@ -770,7 +774,7 @@ var errorRecovery = `
 //
 // An error is either an expectation, something the parser looked for and
 // didn't find (a literal, a production's label, or what a lexer function
-// returned as a parseExpected), or a real error: any other error from a
+// returned as a _PREFIX_Expected), or a real error: any other error from a
 // lexer function or an Error function. coalesce reports only the errors
 // that rank highest in a scope: those furthest into the input, and at one
 // position, real errors over expectations. So a scope keeps only those: an
@@ -778,15 +782,15 @@ var errorRecovery = `
 // them, and a scope that pops is merged into its parent the same way. Every
 // scope's errors therefore rank alike, and the stack stays small however
 // many speculative attempts fail.
-type parserErrorStack struct {
-	stack  []parseError
+type _PREFIX_ErrorStack struct {
+	stack  []_PREFIX_ParseError
 	scopes []int
 	es     []error // scratch buffer reused by coalesce
 }
 
-// parseError is a real error, or when err is nil, an expectation of
+// _PREFIX_ParseError is a real error, or when err is nil, an expectation of
 // expected.
-type parseError struct {
+type _PREFIX_ParseError struct {
 	err      error
 	expected string
 	literal  bool // expected is a literal, which messages quote
@@ -795,31 +799,31 @@ type parseError struct {
 
 // rank orders errors for reporting: errors further into the input rank
 // higher, and at one position, real errors rank higher than expectations.
-func (pe parseError) rank() int {
+func (pe _PREFIX_ParseError) rank() int {
 	if pe.err != nil {
 		return 2*pe.pos + 1
 	}
 	return 2 * pe.pos
 }
 
-// parseExpected is the error a lexer function returns when the input doesn't
+// _PREFIX_Expected is the error a lexer function returns when the input doesn't
 // start with its token, naming the token, such as "a number". The parser
 // lists it with the other things it expected at the same position, as in
 // "expected ';' or a number", rather than reporting it as an error of its
 // own.
-type parseExpected string
+type _PREFIX_Expected string
 
-func (e parseExpected) Error() string {
+func (e _PREFIX_Expected) Error() string {
 	return "expected " + string(e)
 }
 
-// parserNoMatch is the error literal returns when the input doesn't start
+// _PREFIX_NoMatch is the error literal returns when the input doesn't start
 // with the literal. It only signals the failure: literal records what it
 // expected in the error stack.
-var parserNoMatch = errors.New("literal not matched")
+var _PREFIX_NoMatch = errors.New("literal not matched")
 
 // push opens an error scope around a speculative parse attempt.
-func (e *parserErrorStack) push() {
+func (e *_PREFIX_ErrorStack) push() {
 	e.scopes = append(e.scopes, len(e.stack))
 }
 
@@ -827,7 +831,7 @@ func (e *parserErrorStack) push() {
 // errors that rank highest survive. The closing scope's errors are dropped
 // when they rank below the parent's own, they replace the parent's errors
 // when they rank above them, and a tie keeps both.
-func (e *parserErrorStack) pop() {
+func (e *_PREFIX_ErrorStack) pop() {
 	inner := e.scopes[len(e.scopes)-1]
 	e.scopes = e.scopes[:len(e.scopes)-1]
 	outer, n := e.scopeBase(), len(e.stack)
@@ -842,32 +846,32 @@ func (e *parserErrorStack) pop() {
 	}
 }
 
-func (e *parserErrorStack) scopeBase() int {
+func (e *_PREFIX_ErrorStack) scopeBase() int {
 	if n := len(e.scopes); n > 0 {
 		return e.scopes[n-1]
 	}
 	return 0
 }
 
-func (e *parserErrorStack) clear() {
+func (e *_PREFIX_ErrorStack) clear() {
 	e.stack = e.stack[:e.scopeBase()]
 }
 
-// error records err at pos, as an expectation if it's a parseExpected.
-func (e *parserErrorStack) error(err error, pos int) {
-	if want, ok := err.(parseExpected); ok {
-		e.add(parseError{expected: string(want), pos: pos})
+// error records err at pos, as an expectation if it's a _PREFIX_Expected.
+func (e *_PREFIX_ErrorStack) error(err error, pos int) {
+	if want, ok := err.(_PREFIX_Expected); ok {
+		e.add(_PREFIX_ParseError{expected: string(want), pos: pos})
 	} else {
-		e.add(parseError{err: err, pos: pos})
+		e.add(_PREFIX_ParseError{err: err, pos: pos})
 	}
 }
 
 // expect records that the parser expected the literal lit at pos.
-func (e *parserErrorStack) expect(lit string, pos int) {
-	e.add(parseError{expected: lit, literal: true, pos: pos})
+func (e *_PREFIX_ErrorStack) expect(lit string, pos int) {
+	e.add(_PREFIX_ParseError{expected: lit, literal: true, pos: pos})
 }
 
-func (e *parserErrorStack) add(pe parseError) {
+func (e *_PREFIX_ErrorStack) add(pe _PREFIX_ParseError) {
 	if base, n := e.scopeBase(), len(e.stack); n > base {
 		if top := e.stack[n-1].rank(); pe.rank() < top {
 			return
@@ -881,7 +885,7 @@ func (e *parserErrorStack) add(pe parseError) {
 // label replaces the innermost scope's errors with an expectation of want,
 // a production's label, at the same position, if they're expectations. A
 // scope with no errors gets the expectation at start.
-func (e *parserErrorStack) label(want string, start int) {
+func (e *_PREFIX_ErrorStack) label(want string, start int) {
 	base, n := e.scopeBase(), len(e.stack)
 	pos := start
 	if n > base {
@@ -890,20 +894,25 @@ func (e *parserErrorStack) label(want string, start int) {
 		}
 		pos = e.stack[n-1].pos
 	}
-	e.stack = append(e.stack[:base], parseError{expected: want, pos: pos})
+	e.stack = append(e.stack[:base], _PREFIX_ParseError{expected: want, pos: pos})
 }
 
 // coalesce returns the innermost scope's errors as one error: nil if there
-// are none, an expectedError listing them if they're expectations, and
+// are none, an _PREFIX_ExpectedError listing them if they're expectations, and
 // otherwise the real errors, each message once, one per line.
-func (e *parserErrorStack) coalesce() error {
+func (e *_PREFIX_ErrorStack) coalesce() error {
 	scope := e.stack[e.scopeBase():]
 	if len(scope) == 0 {
 		return nil
 	}
 	if scope[0].err == nil {
-		// a scope's errors rank alike, so they're all expectations
-		return &expectedError{want: append([]parseError(nil), scope...)}
+		// a scope's errors rank alike, so they're all expectations. The
+		// error escapes into user code, so it can't be pooled, but it
+		// carries its own small buffer, which keeps the usual short list
+		// to one allocation.
+		ee := &_PREFIX_ExpectedError{}
+		ee.want = append(ee.buf[:0], scope...)
+		return ee
 	}
 
 	es := e.es[:0]
@@ -928,19 +937,22 @@ COALESCE_OUTER:
 	// handlers coalesce on every failed speculative attempt and almost
 	// always discard the result, so rendering eagerly wastes both CPU and
 	// allocations on strings that keep growing as failures cascade
-	return &joinedError{es: append([]error(nil), es...)}
+	return &_PREFIX_JoinedError{es: append([]error(nil), es...)}
 }
 
-// expectedError is what the parser expected at a position, as one message:
+// _PREFIX_ExpectedError is what the parser expected at a position, as one message:
 // "expected ';', '=' or an operator". Each thing expected is listed once,
 // the literals first, quoted, and then the rest, each group sorted. Like
-// joinedError's, the message is rendered when it's first read.
-type expectedError struct {
-	want []parseError
-	msg  string
+// _PREFIX_JoinedError's, the message is rendered when it's first read.
+type _PREFIX_ExpectedError struct {
+	want []_PREFIX_ParseError
+	// buf is where want is built, so that the usual short list of things
+	// expected costs no allocation beyond the error itself
+	buf [4]_PREFIX_ParseError
+	msg string
 }
 
-func (e *expectedError) Error() string {
+func (e *_PREFIX_ExpectedError) Error() string {
 	if e.msg == "" {
 		// an insertion sort, since the lists are short; ws[:lits] are the
 		// literals
@@ -950,7 +962,7 @@ func (e *expectedError) Error() string {
 		for _, v := range e.want {
 			w, lo, hi := v.expected, lits, len(ws)
 			if v.literal {
-				w, lo, hi = quoteLiteral(w), 0, lits
+				w, lo, hi = _PREFIX_QuoteLiteral(w), 0, lits
 			}
 			i := lo
 			for ; i < hi && ws[i] <= w; i++ {
@@ -981,23 +993,23 @@ func (e *expectedError) Error() string {
 	return e.msg
 }
 
-// quoteLiteral quotes a literal for an error message, in single quotes
+// _PREFIX_QuoteLiteral quotes a literal for an error message, in single quotes
 // unless it has one.
-func quoteLiteral(s string) string {
+func _PREFIX_QuoteLiteral(s string) string {
 	if strings.Contains(s, "'") {
 		return fmt.Sprintf("%q", s)
 	}
 	return "'" + s + "'"
 }
 
-// joinedError is a multi-error whose message is rendered lazily and
+// _PREFIX_JoinedError is a multi-error whose message is rendered lazily and
 // memoized.  It prints the error stack in reverse order.
-type joinedError struct {
+type _PREFIX_JoinedError struct {
 	es  []error
 	msg string
 }
 
-func (j *joinedError) Error() string {
+func (j *_PREFIX_JoinedError) Error() string {
 	if j.msg == "" {
 		var sb strings.Builder
 		for i := len(j.es) - 1; i >= 0; i-- {
@@ -1009,7 +1021,7 @@ func (j *joinedError) Error() string {
 	return j.msg
 }
 
-func (e *parserErrorStack) depth() int {
+func (e *_PREFIX_ErrorStack) depth() int {
 	var ret int
 	for _, v := range e.stack[e.scopeBase():] {
 		if v.pos > ret {
@@ -1040,8 +1052,15 @@ func Parse_PREFIX_(input string, data *_PREFIX_Data) %v {
 
 	%v := p.state_ENTRYPOINT_()
 	if err == nil {
-		if strings.TrimSpace(p.input[p.pos:]) != "" {
+		if rest := strings.TrimLeftFunc(p.input[p.pos:], unicode.IsSpace); rest != "" {
+			// the top production matched but input is left over. The
+			// parser may have recorded nothing it expected, in which case
+			// coalesce is nil and the trailing input needs an error of its
+			// own, or the parse would be reported as a success.
 			err = p.errorStack.coalesce()
+			if err == nil {
+				err = fmt.Errorf("unexpected input at offset %%v", len(p.input)-len(rest))
+			}
 			%v
 		}
 	} else {
@@ -1056,7 +1075,7 @@ type _PREFIX_Parser struct {
 	pos         int
 	lineOffsets []int
 	Data        *_PREFIX_Data
-	errorStack  *parserErrorStack
+	errorStack  *_PREFIX_ErrorStack
 
 	posStack []int
 
@@ -1069,8 +1088,8 @@ func new_PREFIX_Parser(input string, data *_PREFIX_Data) *_PREFIX_Parser {
 		input:       input,
 		lineOffsets: _PREFIX_GenerateLineOffsets(input),
 		Data: data,
-		errorStack: &parserErrorStack{
-			stack:  make([]parseError, 0, 64),
+		errorStack: &_PREFIX_ErrorStack{
+			stack:  make([]_PREFIX_ParseError, 0, 64),
 			scopes: make([]int, 0, 64),
 		},
 		posStack: make([]int, 0, 64),
@@ -1109,7 +1128,7 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 	}
 
 	p.errorStack.expect(want, p.pos)
-	return "", parserNoMatch
+	return "", _PREFIX_NoMatch
 }
 
 // blank reports whether the input from start to end is only whitespace,
@@ -1126,7 +1145,14 @@ func Parse_PREFIX_(input []string, data *_PREFIX_Data) %v {
 	%v := p.state_ENTRYPOINT_()
 	if err == nil {
 		if p.pos < len(p.input) {
+			// the top production matched but tokens are left over. The
+			// parser may have recorded nothing it expected, in which case
+			// coalesce is nil and the trailing tokens need an error of
+			// their own, or the parse would be reported as a success.
 			err = p.errorStack.coalesce()
+			if err == nil {
+				err = fmt.Errorf("unexpected input at token %%v", p.pos)
+			}
 			%v
 		}
 	} else {
@@ -1140,7 +1166,7 @@ type _PREFIX_Parser struct {
 	input       []string
 	pos         int
 	Data        *_PREFIX_Data
-	errorStack  *parserErrorStack
+	errorStack  *_PREFIX_ErrorStack
 
 	posStack []int
 
@@ -1152,8 +1178,8 @@ func new_PREFIX_Parser(input []string, data *_PREFIX_Data) *_PREFIX_Parser {
 	p := &_PREFIX_Parser{
 		input:       input,
 		Data: data,
-		errorStack: &parserErrorStack{
-			stack:  make([]parseError, 0, 64),
+		errorStack: &_PREFIX_ErrorStack{
+			stack:  make([]_PREFIX_ParseError, 0, 64),
 			scopes: make([]int, 0, 64),
 		},
 		posStack: make([]int, 0, 64),
@@ -1174,7 +1200,7 @@ func (p *_PREFIX_Parser) literal(want string) (string, error) {
 	}
 
 	p.errorStack.expect(want, p.pos)
-	return "", parserNoMatch
+	return "", _PREFIX_NoMatch
 }
 
 // blank reports whether the tokens from start to end are only whitespace:

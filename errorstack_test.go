@@ -22,7 +22,7 @@ import (
 // "[a@5 'b'@5 <c>@5]": a real error, an expected literal, and another
 // expectation, such as a label. It fails the test if a scope's errors don't
 // all rank alike, which pop relies on.
-func scopes(t *testing.T, e *parserErrorStack) string {
+func scopes(t *testing.T, e *pbpgErrorStack) string {
 	t.Helper()
 	bounds := append([]int{0}, e.scopes...)
 	bounds = append(bounds, len(e.stack))
@@ -48,7 +48,7 @@ func scopes(t *testing.T, e *parserErrorStack) string {
 }
 
 func TestErrorStack(t *testing.T) {
-	var e parserErrorStack
+	var e pbpgErrorStack
 	check := func(want string) {
 		t.Helper()
 		if got := scopes(t, &e); got != want {
@@ -127,7 +127,7 @@ func TestErrorStack(t *testing.T) {
 }
 
 func TestErrorStackRank(t *testing.T) {
-	var e parserErrorStack
+	var e pbpgErrorStack
 	check := func(want string) {
 		t.Helper()
 		if got := scopes(t, &e); got != want {
@@ -135,9 +135,9 @@ func TestErrorStackRank(t *testing.T) {
 		}
 	}
 
-	// literals and parseExpected errors are both expectations
+	// literals and pbpgExpected errors are both expectations
 	e.expect("x", 5)
-	e.error(parseExpected("num"), 5)
+	e.error(pbpgExpected("num"), 5)
 	check("['x'@5 <num>@5]")
 
 	// at one position, a real error replaces expectations, and an
@@ -145,7 +145,7 @@ func TestErrorStackRank(t *testing.T) {
 	e.error(errors.New("a"), 5)
 	check("[a@5]")
 	e.expect("y", 5)
-	e.error(parseExpected("num"), 5)
+	e.error(pbpgExpected("num"), 5)
 	check("[a@5]")
 	e.error(errors.New("b"), 5)
 	check("[a@5 b@5]")
@@ -184,7 +184,7 @@ func TestErrorStackLabel(t *testing.T) {
 	// the expectations of a production that failed where it started are
 	// replaced by its label
 	e.expect("x", 2)
-	e.error(parseExpected("num"), 2)
+	e.error(pbpgExpected("num"), 2)
 	label(2, "[<L>@2]")
 
 	// so are those past only whitespace, at their own position
@@ -221,7 +221,7 @@ type listErr []string
 func (l listErr) Error() string { return strings.Join(l, " ") }
 
 func TestErrorStackCoalesce(t *testing.T) {
-	var e parserErrorStack
+	var e pbpgErrorStack
 	one := errors.New("expected x")
 	e.error(one, 4)
 	if err := e.coalesce(); err != one {
@@ -243,19 +243,19 @@ func TestErrorStackCoalesce(t *testing.T) {
 		add  func()
 		want string
 	}{
-		{func() { e.error(parseExpected("a number"), 4) }, "expected a number"},
+		{func() { e.error(pbpgExpected("a number"), 4) }, "expected a number"},
 		{func() { e.expect(";", 4) }, "expected ';'"},
 		{func() {
-			e.error(parseExpected("a number"), 4)
+			e.error(pbpgExpected("a number"), 4)
 			e.expect(";", 4)
 		}, "expected ';' or a number"},
 		{func() {
 			e.expect("x", 4)
-			e.error(parseExpected("a number"), 4)
+			e.error(pbpgExpected("a number"), 4)
 			e.expect("'", 4)
-			e.error(parseExpected("a name"), 4)
+			e.error(pbpgExpected("a name"), 4)
 			e.expect("x", 4)
-			e.error(parseExpected("a number"), 4)
+			e.error(pbpgExpected("a number"), 4)
 			e.expect("(", 4)
 		}, `expected "'", '(', 'x', a name or a number`},
 	}
